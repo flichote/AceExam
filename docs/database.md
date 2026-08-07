@@ -1,9 +1,10 @@
-# AceExam 数据库设计（M1 基线 + M2 增量）
+# AceExam 数据库设计（M1 基线 + M2/M3 增量）
 
-> **状态**：M2 增量 v1.1（2026-08-07）｜**作者**：ep-db
-> **定位**：表结构事实来源。需求见 [PRD](./PRD.md)；系统设计见 [architecture](./architecture.md)（subject 维度贯穿 / RAG 管线 / LLM 分级 / M2 五件套）；知识点状态机见 [flows](./design/flows.md)。
+> **状态**：M3 增量 v1.2（2026-08-08）｜**作者**：ep-db
+> **定位**：表结构事实来源。需求见 [PRD](./PRD.md)；系统设计见 [architecture](./architecture.md)（subject 维度贯穿 / RAG 管线 / LLM 分级 / M2 五件套 + M3 图谱/突击/看板/排行/预警）；知识点状态机见 [flows](./design/flows.md)。
 > **评审**：本文件与迁移脚本由 ep-arch 评审后锁定；任何表结构变更必须走 Alembic 迁移 + 同步更新本文档，禁止手改线上库。
 > **M2 增量说明**：M1 基线（§1~§7）保持不动；M2 表增量（`user_knowledge_states.streak` / `study_sessions.checked_in_at` / `ocr_uploads` / `diagnosis_reports` / `textbook_uploads` / `document_chunks.source` 取值扩展）见 §8，由迁移 `0002_m2_diagnosis_checkin_ocr` 落地。
+> **M3 增量说明**：M2 §8 保持不动；M3 表增量（唯一新表 `sprint_sessions`；打卡连胜/排行榜/挂科预警/高频考点识别确认无新表）见 §9，由迁移 `0003_m3_sprint` 落地。
 
 ---
 
@@ -24,6 +25,7 @@
 users 1 ──── n wrong_answers n ──── 1 questions n ──── 1 knowledge_points n ──── 1 subjects
 users 1 ──── n user_knowledge_states n ──── 1 knowledge_points
 users 1 ──── n plans / study_sessions
+users 1 ──── n sprint_sessions（M3 突击会话，题单快照）
 subjects 1 ──── n knowledge_points（自引用 parent_id 组成树）
 subjects 1 ──── n document_chunks（教材向量，RAG 语料）
 questions 1 ── 1 question_embeddings（题目向量）
@@ -49,6 +51,7 @@ users 1 ──── n chat_sessions / token_usage
 | `ocr_uploads`（M2） | 拍照录题上传记录（pending→parsed/failed→confirmed） | ocr |
 | `diagnosis_reports`（M2） | 薄弱诊断报告（自测题组/作答/薄弱 Top5 快照） | diagnose |
 | `textbook_uploads`（M2） | 教材上传→切块→embed 状态跟踪 | rag / textbooks |
+| `sprint_sessions`（M3） | 考前突击会话（激活时间/题单快照/高频考点快照/完成统计） | sprint |
 
 ---
 
@@ -358,6 +361,27 @@ users 1 ──── n chat_sessions / token_usage
 
 > 数据流（架构 §10.2）：上传 → `textbook_uploads`（processing）→ 切块写 `document_chunks`（source='user_upload'）→ embedding 回填 → status='ready'；chunk_count 暴露处理进度。
 
+### 2.17 sprint_sessions —— 考前突击会话（M3 新增）
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| id | UUID | PK, gen_random_uuid() | |
+| user_id | UUID | NOT NULL, FK → users.id | |
+| subject_id | UUID | NOT NULL, FK → subjects.id | |
+| activated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 激活时间（自动激活 = 首次访问题单时创建；手动激活 = POST /sprint/activate） |
+| auto_activated | BOOLEAN | NOT NULL, DEFAULT false | 自动（考前 7 天触发）/ 手动 |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'active', CHECK | `active` 突击中 / `completed` 已结束 / `expired` 考试日已过 |
+| expires_at | DATE | NULL | 考试日（关联计划 exam_date 快照；无 active 计划为 NULL） |
+| question_snapshot | JSONB | NOT NULL, DEFAULT '[]' | 题单快照 `[{"id": "<question_id>", "tag": "high_freq"\|"wrong_review"}]`，防重复组卷/题目下线漂移（api.md §11.3：重复请求返回同一份题单） |
+| high_freq_kps | JSONB | NULL | 高频考点 top-N 快照 `[{"id","name","heat","avg_accuracy","has_past_exam"}]`（展示"本卷覆盖高频考点"） |
+| stats | JSONB | NULL | 完成统计 `{"questions_practiced","correct_count","accuracy"}`（可选） |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+
+索引：`ix_sprint_user_subject_status`：(user_id, subject_id, status)（幂等激活/会话列表）
+
+> 设计说明（架构 §11.2 / §11.7-1）：突击模式为会员功能；同一时刻每用户每科目至多一个 `active`（服务层先查后建 + 幂等，**不建部分唯一索引，简单为先**——用户可有多个 completed/expired 历史会话，故不能对 (user_id, subject_id, status) 加唯一约束）。
+
 ---
 
 ## 3. 枚举 / 取值清单
@@ -426,6 +450,7 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 | ocr_uploads.status（M2） | `pending` / `parsed` / `failed` / `confirmed` | `status IN ('pending','parsed','failed','confirmed')` |
 | diagnosis_reports.status（M2） | `in_progress` / `completed` | `status IN ('in_progress','completed')` |
 | textbook_uploads.status（M2） | `processing` / `ready` / `failed` | `status IN ('processing','ready','failed')` |
+| sprint_sessions.status（M3） | `active` / `completed` / `expired` | `status IN ('active','completed','expired')` |
 | document_chunks.source（M2 取值扩展） | 内置教材名 / `user_upload` | VARCHAR 无 CHECK，天然支持 |
 
 ---
@@ -460,6 +485,7 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 | `ix_ocr_user_status`（M2） | ocr_uploads | (user_id, status) | OCR 记录列表 |
 | `ix_diag_user_created`（M2） | diagnosis_reports | (user_id, created_at) | 诊断报告列表 |
 | `ix_tb_user_status`（M2） | textbook_uploads | (user_id, status) | 教材上传列表 |
+| `ix_sprint_user_subject_status`（M3） | sprint_sessions | (user_id, subject_id, status) | 突击会话幂等激活/列表 |
 
 > 向量 HNSW 参数：`m=16, ef_construction=64`（pgvector 默认推荐），数据量增长后可按需调整 `ef_search`（查询时指定）。
 
@@ -467,7 +493,7 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 
 ## 5. 迁移与种子
 
-- 迁移：Alembic（`backend/alembic/`），初始迁移 `versions/0001_initial.py` 建全部 M1 表 + 索引 + `CREATE EXTENSION IF NOT EXISTS vector`；M2 增量迁移 `versions/0002_m2_diagnosis_checkin_ocr.py`（streak / checked_in_at / ocr_uploads / diagnosis_reports / textbook_uploads）。
+- 迁移：Alembic（`backend/alembic/`），初始迁移 `versions/0001_initial.py` 建全部 M1 表 + 索引 + `CREATE EXTENSION IF NOT EXISTS vector`；M2 增量迁移 `versions/0002_m2_diagnosis_checkin_ocr.py`（streak / checked_in_at / ocr_uploads / diagnosis_reports / textbook_uploads）；M3 增量迁移 `versions/0003_m3_sprint.py`（sprint_sessions 新表）。
 - 配置：`DATABASE_URL` 环境变量（如 `postgresql+psycopg://aceexam:aceexam@localhost:5432/aceexam`），`.env` 不入库。
 - 种子：`backend/app/db/seed.py`（纯 SQLAlchemy 脚本，不依赖 FastAPI），幂等（已存在科目则跳过或 --reset 清空重建）。
 - 种子内容：
@@ -475,6 +501,7 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
   - 每科知识点图谱：≥ 3 章 × ≥ 5 知识点（章 → 知识点两级，节级留空待扩展）
   - 每科题库：≥ 30 题（含答案 + 解析，直接可刷）
   - `document_chunks`（M2 补充）：高数教材示例分块语料 7 块（source='textbook'，embedding 置空由后台 embedder 回填），供 RAG 讲解/dev 检索使用
+  - M3 演示数据（§9.2）：3 个演示用户（含会员）+ 备考计划 + 近 14 天 study_sessions 打卡/做题记录 + user_knowledge_states 样本 + 一条 active sprint_sessions 快照，供连胜/排行榜/看板/预警/突击页面演示
 
 ---
 
@@ -521,3 +548,28 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 - **诊断**：`user_knowledge_states` 是"每用户每知识点"的实时状态（正确/错误计数 + streak），**不足以表达"某次自测批次的题组/作答/薄弱快照"**（自测后题目可能被改或下线、报告需与自测表现一致），故新增 `diagnosis_reports` 快照表，原始状态仍实时读 `user_knowledge_states`。
 - **打卡/计划**：`plans` + `study_sessions` 足以支撑"倒计时 + 每日任务 + 打卡"（每日任务由规则引擎实时推导，不落任务表，架构 §10.5）；仅补 `checked_in_at` 字段（API 返回需要）。
 - **OCR 录题**：独立 `ocr_uploads` 表，**不直接复用 questions**——OCR 产物是"待确认草稿"（可能识别错误、答案置信度低），须经前端编辑 + `/questions/from-ocr` 确认后才入库 questions（source='ugc'）并回填 `question_id`，避免垃圾答案污染题库。
+
+---
+
+## 9. M3 表增量（T14 交付）
+
+> 落地迁移：`backend/alembic/versions/0003_m3_sprint.py`（down_revision=0002_m2_diagnosis_checkin_ocr）。
+> 事实来源：architecture.md §11.7（表增量约定）+ §11.9 决策锁定 D4；本小节与迁移脚本同步更新（评审后锁定）。
+
+### 9.1 变更清单
+
+| # | 对象 | 变更 | 说明 |
+|---|---|---|---|
+| 1 | `sprint_sessions` | 新表 | 考前突击会话（激活时间/题单快照/高频考点快照/完成统计），见 §2.17 |
+| 2 | 打卡连胜 | **无新表无新字段** | `study_sessions` 的 UNIQUE(user_id, session_date) + checked_in/checked_in_at 已支撑（架构 §11.3 确认）；判定 = 按日期的 checked_in=true 序列 |
+| 3 | 排行榜 | **无新表** | 纯查询方案（实时聚合 study_sessions GROUP BY + 连胜），MVP 数据量毫秒级（架构 §11.5） |
+| 4 | 挂科预警 | **无新表** | 实时推导瞬态视图，无历史/推送需求（架构 §11.6） |
+| 5 | 高频考点识别 | **无新表** | 从 user_knowledge_states 实时聚合（架构 §11.2） |
+
+### 9.2 评审结论（T14 决策）
+
+- **突击会话**：M3 唯一新表。题单需**稳定快照**（防重复组卷/题目下线漂移，重复请求返回同一份 `question_snapshot`），统计类功能可实时推导但题单不行，故建 `sprint_sessions`（架构 §11.7-1 / §11.9 D4）。
+- **打卡连胜**：`study_sessions` 天然支撑——每用户每天至多一行（UNIQUE），`checked_in` 为打卡事实；只需按日期序列内存 O(n) 遍历（D7：最近打卡日 = today/yesterday 则未断，间隔 ≥ 2 天即断；时区 Asia/Shanghai 日界）。无快照表可避免双写同步问题。
+- **排行榜**：纯查询优于聚合表/物化视图——MVP 用户量小、聚合毫秒级、缓存收益低；少一张表少一处刷新任务。**预留**（用户量 > 1k 或查询 > 100ms 时启用）：`leaderboard_snapshots`（每日快照：user_id / subject_id / total_correct / accuracy / current_streak / snapshot_date，UNIQUE(user_id, subject_id, snapshot_date)），M3 不建。
+- **挂科预警**：预警是实时推导的瞬态视图（同一天看结果一致），无历史/推送需求，复用现有表实时计算。**预留**（V2 要"预警推送/历史趋势"时启用）：`risk_alerts`（user_id / subject_id / knowledge_point_id / risk_level / reasons JSONB / triggered_at / handled），M3 不建。
+- **演示数据**：M3 功能（连胜/排行榜/看板/预警/突击）全部实时推导，需要用户维度的历史数据才能演示——seed.py 补充 3 个演示用户（`demo_student1` 会员·考前 7 天·近 5 天连胜 / `demo_student2` 会员·14 天连胜·高正确率 / `demo_free` 免费·低活跃·无计划）+ 对应 plans / study_sessions（近 14 天打卡+做题）/ user_knowledge_states / 一条 active sprint_sessions 快照。演示密码统一 `demo123456`（仅本地开发用）。

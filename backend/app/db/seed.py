@@ -1,4 +1,4 @@
-"""AceExam M1/M2 种子数据脚本（ep-db 交付，纯 SQLAlchemy，不依赖 FastAPI）。
+"""AceExam M1/M2/M3 种子数据脚本（ep-db 交付，纯 SQLAlchemy，不依赖 FastAPI）。
 
 用法（backend/ 目录下）：
     DATABASE_URL=postgresql+psycopg://aceexam:aceexam@localhost:5432/aceexam \\
@@ -11,14 +11,20 @@
   - questions：每科 ≥30 题，含 answer + analysis，可直接刷
   - document_chunks（M2 补充）：高数教材示例分块语料（source='textbook'，
     embedding 置空由后台 embedder 回填），供 RAG 讲解/dev 检索使用
+  - M3 演示数据（§9.2）：3 个演示用户（demo_student1 会员·考前 7 天·5 天连胜 /
+    demo_student2 会员·14 天连胜·高正确率 / demo_free 免费·低活跃·无计划）+
+    备考计划 + 近 14 天 study_sessions 打卡/做题记录 + user_knowledge_states 样本 +
+    一条 active sprint_sessions 快照（供连胜/排行榜/看板/预警/突击页面演示，
+    演示密码统一 demo123456，仅本地开发用）
 
-数据事实来源：docs/database.md §2（表结构）、§3（枚举/config 格式）、§8（M2 增量）。
+数据事实来源：docs/database.md §2（表结构）、§3（枚举/config 格式）、§8（M2 增量）、§9（M3 增量）。
 """
 import argparse
 import hashlib
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # 允许直接 `python backend/app/db/seed.py` 运行（无需安装包、无需 FastAPI）
 BACKEND_DIR = str(Path(__file__).resolve().parents[2])
@@ -28,13 +34,28 @@ if BACKEND_DIR not in sys.path:
 from sqlalchemy import create_engine, delete, select, text  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 
+from app.core.security import hash_password  # noqa: E402
 from app.db import models  # noqa: E402
 from app.db.models import (  # noqa: E402
     DocumentChunk,
     KnowledgePoint,
+    Plan,
     Question,
+    SprintSession,
+    StudySession,
     Subject,
+    User,
+    UserKnowledgeState,
 )
+
+# M3 演示数据（docs/database.md §9.2）：演示密码统一 demo123456（仅本地开发用）
+DEMO_PASSWORD = "demo123456"
+# 连胜/预警日界统一 Asia/Shanghai（architecture.md §11.3 D7）。
+# Windows 无系统 tzdata 时回退固定 +08:00（Asia/Shanghai 无夏令时，等价）。
+try:
+    TZ_SHANGHAI = ZoneInfo("Asia/Shanghai")
+except ZoneInfoNotFoundError:
+    TZ_SHANGHAI = timezone(timedelta(hours=8))
 
 # ---------------------------------------------------------------------------
 # 种子数据（结构化：章节 → 知识点 → 题目）
@@ -630,6 +651,224 @@ ENGLISH = {
 SUBJECTS = [MATH_GAOSHU, ENGLISH]
 
 
+def _seed_m3_demo(session: Session) -> None:
+    """M3 演示数据（docs/database.md §9.2）。
+
+    演示用户（密码统一 demo123456，仅本地开发用）：
+      - demo_student1：会员·考前 7 天·当前 5 天连胜（历史最长 8 天）·高风险预警·active 突击会话
+      - demo_student2：会员·14 天全勤连胜·高正确率·低风险预警
+      - demo_free：免费·低活跃·无计划（演示会员 403 边界 + 预警空态）
+
+    幂等：任一演示用户已存在则跳过（配合主流程"已存在科目则跳过"）。
+    """
+    existing_users = set(session.scalars(select(User.username)).all())
+    if existing_users & {"demo_student1", "demo_student2", "demo_free"}:
+        print("[seed] M3 演示用户已存在，跳过演示数据")
+        return
+
+    math = session.scalars(select(Subject).where(Subject.code == "math_gaoshu")).first()
+    if math is None:
+        print("[seed] 未找到 math_gaoshu 科目，跳过 M3 演示数据")
+        return
+
+    leaf_kps = list(
+        session.scalars(
+            select(KnowledgePoint).where(
+                KnowledgePoint.subject_id == math.id, KnowledgePoint.level == 3
+            )
+        ).all()
+    )
+    kp_by_name = {kp.name: kp for kp in leaf_kps}
+    math_questions = list(
+        session.scalars(
+            select(Question).where(
+                Question.subject_id == math.id, Question.status == "active"
+            )
+        ).all()
+    )
+    if not leaf_kps or not math_questions:
+        print("[seed] 高数叶子知识点/题目为空，跳过 M3 演示数据")
+        return
+
+    today = datetime.now(TZ_SHANGHAI).date()
+    now_utc = datetime.now(timezone.utc)
+    password_hash = hash_password(DEMO_PASSWORD)
+
+    def _add_ukstate(user_id, kp_name, status, correct, wrong, streak, days_ago=1):
+        kp = kp_by_name.get(kp_name)
+        if kp is None:
+            return
+        session.add(
+            UserKnowledgeState(
+                user_id=user_id,
+                knowledge_point_id=kp.id,
+                subject_id=math.id,
+                status=status,
+                correct_count=correct,
+                wrong_count=wrong,
+                streak=streak,
+                last_practiced_at=now_utc - timedelta(days=days_ago),
+                updated_at=now_utc - timedelta(days=days_ago),
+            )
+        )
+
+    # ── demo_student1：会员·考前 7 天·当前 5 天连胜（历史最长 8 天）·高风险预警 ──
+    u1 = User(
+        username="demo_student1",
+        password_hash=password_hash,
+        role="student",
+        is_member=True,
+    )
+    session.add(u1)
+    session.flush()
+    plan1 = Plan(
+        user_id=u1.id,
+        subject_id=math.id,
+        title="高数期末冲刺（M3 演示）",
+        exam_date=today + timedelta(days=7),
+        status="active",
+        config={"daily_question_target": 10},
+    )
+    session.add(plan1)
+    session.flush()
+    # 打卡序列：前 8 天连续（-13..-6），断 1 天（-5 做题未打卡），后 5 天连续（-4..0）
+    # → current=5, longest=8（D7 判定：最近打卡日=今天未断）
+    checkin_offsets = [-13, -12, -11, -10, -9, -8, -7, -6, -4, -3, -2, -1, 0]
+    for off in checkin_offsets:
+        q = 8 + (off % 5)  # 8..12
+        session.add(
+            StudySession(
+                user_id=u1.id,
+                subject_id=math.id,
+                plan_id=plan1.id,
+                session_date=today + timedelta(days=off),
+                questions_practiced=q,
+                correct_count=max(5, q - 3),
+                checked_in=True,
+                checked_in_at=now_utc - timedelta(days=-off),
+            )
+        )
+    session.add(
+        StudySession(
+            user_id=u1.id,
+            subject_id=math.id,
+            plan_id=plan1.id,
+            session_date=today + timedelta(days=-5),
+            questions_practiced=6,
+            correct_count=4,
+            checked_in=False,
+            checked_in_at=None,
+        )
+    )
+    # 知识点状态：2 weak + 1 consolidating（weak_count=3 → days_left≤7 → 高风险，架构 §11.6）
+    _add_ukstate(u1.id, "洛必达法则", "weak", 1, 4, 0)
+    _add_ukstate(u1.id, "分部积分法", "weak", 2, 4, 0)
+    _add_ukstate(u1.id, "函数极限", "consolidating", 5, 3, 2)
+    _add_ukstate(u1.id, "导数概念", "mastered", 3, 0, 3)
+    _add_ukstate(u1.id, "两个重要极限", "mastered", 4, 1, 3)
+    _add_ukstate(u1.id, "微积分基本定理", "mastered", 3, 1, 3)
+    # 突击会话（会员·自动激活·考前 7 天）：题单快照前 12 题（10 high_freq + 2 wrong_review）
+    snapshot = [
+        {"id": str(q.id), "tag": "high_freq" if i < 10 else "wrong_review"}
+        for i, q in enumerate(math_questions[:12])
+    ]
+    session.add(
+        SprintSession(
+            user_id=u1.id,
+            subject_id=math.id,
+            activated_at=now_utc,
+            auto_activated=True,
+            status="active",
+            expires_at=today + timedelta(days=7),
+            question_snapshot=snapshot,
+            high_freq_kps=[
+                {
+                    "id": str(kp_by_name["洛必达法则"].id),
+                    "name": "洛必达法则",
+                    "heat": 128,
+                    "avg_accuracy": 0.42,
+                    "has_past_exam": True,
+                }
+            ],
+            stats={"questions_practiced": 0, "correct_count": 0, "accuracy": None},
+        )
+    )
+
+    # ── demo_student2：会员·14 天全勤连胜·高正确率·低风险预警 ──
+    u2 = User(
+        username="demo_student2",
+        password_hash=password_hash,
+        role="student",
+        is_member=True,
+    )
+    session.add(u2)
+    session.flush()
+    plan2 = Plan(
+        user_id=u2.id,
+        subject_id=math.id,
+        title="高数系统复习（M3 演示）",
+        exam_date=today + timedelta(days=21),
+        status="active",
+        config={"daily_question_target": 15},
+    )
+    session.add(plan2)
+    session.flush()
+    for off in range(-13, 1):
+        q = 12 + (off % 4)  # 12..15
+        session.add(
+            StudySession(
+                user_id=u2.id,
+                subject_id=math.id,
+                plan_id=plan2.id,
+                session_date=today + timedelta(days=off),
+                questions_practiced=q,
+                correct_count=q - 2,  # ~85% 正确率
+                checked_in=True,
+                checked_in_at=now_utc - timedelta(days=-off),
+            )
+        )
+    for name in [
+        "数列极限",
+        "函数单调性与极值",
+        "定积分概念与性质",
+        "反常积分",
+        "微分",
+        "求导法则",
+        "复合函数求导",
+        "第一换元法（凑微分）",
+    ]:
+        _add_ukstate(u2.id, name, "mastered", 3, 0, 3)
+
+    # ── demo_free：免费·低活跃·无计划（演示会员 403 边界 + 预警空态）──
+    u3 = User(
+        username="demo_free",
+        password_hash=password_hash,
+        role="student",
+        is_member=False,
+    )
+    session.add(u3)
+    session.flush()
+    for off, q, c in [(-9, 6, 4), (-5, 8, 5), (-2, 5, 3)]:
+        session.add(
+            StudySession(
+                user_id=u3.id,
+                subject_id=math.id,
+                plan_id=None,
+                session_date=today + timedelta(days=off),
+                questions_practiced=q,
+                correct_count=c,
+                checked_in=True,
+                checked_in_at=now_utc - timedelta(days=-off),
+            )
+        )
+    _add_ukstate(u3.id, "函数概念与性质", "consolidating", 2, 2, 1, days_ago=2)
+
+    print(
+        "[seed] M3 演示数据：demo_student1（会员/考前7天/5天连胜/高风险/突击active）"
+        " + demo_student2（会员/14天连胜/低风险） + demo_free（免费/无计划）"
+    )
+
+
 def get_engine(database_url: str):
     return create_engine(database_url, pool_pre_ping=True)
 
@@ -653,6 +892,7 @@ def seed(database_url: str, reset: bool = False) -> None:
                 models.TextbookUpload.__tablename__,
                 models.OcrUpload.__tablename__,
                 models.DiagnosisReport.__tablename__,
+                models.SprintSession.__tablename__,
                 models.StudySession.__tablename__,
                 models.Plan.__tablename__,
                 models.UserKnowledgeState.__tablename__,
@@ -664,8 +904,13 @@ def seed(database_url: str, reset: bool = False) -> None:
                 models.Subject.__tablename__,
                 models.User.__tablename__,
             ]
-            for t in tables:
-                session.execute(text(f'TRUNCATE TABLE "{t}" CASCADE'))
+            if engine.dialect.name == "postgresql":
+                for t in tables:
+                    session.execute(text(f'TRUNCATE TABLE "{t}" CASCADE'))
+            else:
+                # SQLite 无 TRUNCATE：按外键逆序 DELETE（列表已子→父排序）
+                for t in tables:
+                    session.execute(text(f'DELETE FROM "{t}"'))
             session.commit()
             print("[seed] 已清空全部业务表")
 
@@ -752,6 +997,11 @@ def seed(database_url: str, reset: bool = False) -> None:
                     )
                 )
                 total_chunks += 1
+
+        # M3：演示数据（演示用户/计划/打卡/做题记录/知识点状态/突击会话，docs/database.md §9.2）
+        # 先 flush 让 questions 拿到 id，演示数据需要引用真实题目/知识点
+        session.flush()
+        _seed_m3_demo(session)
 
         session.commit()
         print(f"[seed] 完成：2 科目 / {total_kp} 知识点 / {total_q} 题 / {total_chunks} 教材分块")
