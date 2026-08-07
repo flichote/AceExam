@@ -1,0 +1,67 @@
+{
+	"easycom": {
+		"autoscan": true,
+		"custom": {
+			"^uni-(.*)": "@dcloudio/uni-ui/lib/uni-$1/uni-$1.vue"
+		}
+	},
+	"pages": [
+		{
+			"path": "pages/subjects/index",
+			"style": {
+				"navigationBarTitleText": "AceExam",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/practice/index",
+			"style": {
+				"navigationBarTitleText": "刷题"
+			}
+		},
+		{
+			"path": "pages/chat/index",
+			"style": {
+				"navigationBarTitleText": "AI 备考教练"
+			}
+		},
+		{
+			"path": "pages/mine/index",
+			"style": {
+				"navigationBarTitleText": "我的"
+			}
+		}
+	],
+	"tabBar": {
+		"color": "#9CA3AF",
+		"selectedColor": "#F59E0B",
+		"backgroundColor": "#FFFFFF",
+		"borderStyle": "black",
+		"list": [
+			{
+				"pagePath": "pages/subjects/index",
+				"text": "选科",
+				"iconPath": "static/tabbar/subjects.png",
+				"selectedIconPath": "static/tabbar/subjects-active.png"
+			},
+			{
+				"pagePath": "pages/practice/index",
+				"text": "刷题",
+				"iconPath": "static/tabbar/practice.png",
+				"selectedIconPath": "static/tabbar/practice-active.png"
+			},
+			{
+				"pagePath": "pages/mine/index",
+				"text": "我的",
+				"iconPath": "static/tabbar/mine.png",
+				"selectedIconPath": "static/tabbar/mine-active.png"
+			}
+		]
+	},
+	"globalStyle": {
+		"navigationBarTextStyle": "white",
+		"navigationBarTitleText": "AceExam",
+		"navigationBarBackgroundColor": "#F59E0B",
+		"backgroundColor": "#F3F4F6"
+	}
+}
