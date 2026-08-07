@@ -72,6 +72,24 @@
 			"style": {
 				"navigationBarTitleText": "登录"
 			}
+		},
+		{
+			"path": "pages/diagnose/graph",
+			"style": {
+				"navigationBarTitleText": "知识点图谱"
+			}
+		},
+		{
+			"path": "pages/sprint/index",
+			"style": {
+				"navigationBarTitleText": "考前突击"
+			}
+		},
+		{
+			"path": "pages/leaderboard/index",
+			"style": {
+				"navigationBarTitleText": "排行榜"
+			}
 		}
 	],
 	"tabBar": {

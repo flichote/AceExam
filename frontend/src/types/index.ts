@@ -302,3 +302,173 @@ export interface PracticeStat {
   streak: number;
   week: { day: string; count: number }[];
 }
+
+/* ===== M3 图谱 / 突击 / 看板 / 排行 / 预警（docs/api.md §11）===== */
+
+/** 图谱节点状态（docs/api.md §11.1；叶子实时状态 / 父节点聚合） */
+export type GraphNodeStatus = "mastered" | "weak" | "consolidating" | "untouched";
+
+/** 知识点图谱节点（章 level=1 / 节 level=2 / 知识点 level=3） */
+export interface GraphNode {
+  id: string;
+  name: string;
+  level: number;
+  status: GraphNodeStatus;
+  /** 该节点（子树）题量 */
+  question_count: number;
+  /** 仅叶子有练习记录时返回 */
+  practice_count?: number;
+  /** 仅叶子有练习记录时返回（0~1，未接触为 null） */
+  accuracy?: number | null;
+  children?: GraphNode[];
+}
+
+/** GET /subjects/{id}/knowledge-graph 响应（§11.1） */
+export interface KnowledgeGraphResponse {
+  subject_id: string;
+  subject_name: string;
+  generated_at: string;
+  root: GraphNode;
+  stats: {
+    total_nodes: number;
+    leaf_count: number;
+    mastered_count: number;
+    weak_count: number;
+    consolidating_count: number;
+    untouched_count: number;
+  };
+}
+
+/* ===== M3 考前突击（§11.2 / §11.3）===== */
+
+export interface SprintSession {
+  id: string;
+  subject_id: string;
+  status: string; // active
+  activated_at: string;
+  auto_activated: boolean;
+  exam_date: string | null;
+  days_left: number | null;
+  expires_at: string | null;
+}
+
+export interface SprintActivateResult {
+  sprint: SprintSession;
+  created: boolean;
+}
+
+export interface HighFreqKp {
+  id: string;
+  name: string;
+  heat: number;
+  avg_accuracy: number;
+  has_past_exam: boolean;
+}
+
+export interface SprintSummary {
+  high_freq_questions: number;
+  wrong_review_questions: number;
+  deduped: number;
+  total: number;
+}
+
+export interface SprintMockMeta {
+  duration_min: number;
+  total_score: number;
+  started_at: string | null;
+}
+
+/** GET /subjects/{id}/sprint/questions 响应（§11.3） */
+export interface SprintQuestionsResponse {
+  sprint_id: string;
+  status: string;
+  days_left: number | null;
+  high_freq_kps: HighFreqKp[];
+  /** QuestionPublic（不含 answer/analysis；tag: high_freq | wrong_review） */
+  items: Question[];
+  summary: SprintSummary;
+  mock: SprintMockMeta | null;
+}
+
+/* ===== M3 学习数据看板（§11.4 / §11.5）===== */
+
+export interface DashboardSummary {
+  totals: { questions_practiced: number; correct_count: number; accuracy: number };
+  mastery: { leaf_total: number; mastered: number; mastery_pct: number };
+  streak: { current: number; longest: number };
+  weak_points: { weak: number; consolidating: number };
+  per_subject: {
+    subject_id: string;
+    subject_name: string;
+    questions_practiced: number;
+    correct_count: number;
+    accuracy: number;
+    mastery_pct: number;
+  }[];
+  exam: { has_active_plan: boolean; days_left: number | null };
+}
+
+export interface TrendItem {
+  bucket_start: string;
+  questions_practiced: number;
+  correct_count: number;
+  /** 桶无做题记录为 null */
+  accuracy: number | null;
+  mastered_kp_count: number;
+  mastery_pct: number;
+}
+
+export interface TrendResponse {
+  granularity: string;
+  items: TrendItem[];
+}
+
+/* ===== M3 排行榜（§11.6）===== */
+
+export interface LeaderboardItem {
+  rank: number;
+  user_id: string;
+  username: string;
+  total_correct: number;
+  questions_practiced: number;
+  accuracy: number;
+  current_streak: number;
+}
+
+export interface LeaderboardResponse {
+  scope: string;
+  items: LeaderboardItem[];
+  page: number;
+  page_size: number;
+  total: number;
+  /** 当前用户（不在榜时 rank=null 但附统计） */
+  me: {
+    rank: number | null;
+    total_correct: number;
+    questions_practiced: number;
+    accuracy: number;
+  } | null;
+}
+
+/* ===== M3 挂科预警（§11.7）===== */
+
+export type RiskLevel = "high" | "medium" | "low";
+
+export interface WarningItem {
+  knowledge_point_id: string;
+  knowledge_point_name: string;
+  risk_level: RiskLevel;
+  /** 规则层确定性理由 */
+  reasons: string[];
+  /** LLM（flash）措辞 */
+  suggestion: string;
+  days_left: number | null;
+  accuracy: number | null;
+  practice_count: number;
+}
+
+export interface WarningsResponse {
+  overall_risk: RiskLevel | null;
+  items: WarningItem[];
+  generated_at: string;
+}

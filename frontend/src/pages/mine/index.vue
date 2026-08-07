@@ -14,48 +14,85 @@
         </view>
         <text class="profile-sub">距考试最近：{{ nearestExam }}</text>
       </view>
+      <StreakBadge v-if="dashboard && dashboard.streak.current > 0" :days="dashboard.streak.current" variant="primary" />
     </view>
 
-    <!-- 学习数据看板（P1 完整版见 docs/design/pages.md） -->
+    <!-- 学习数据看板（M3：GET /me/dashboard） -->
     <view class="section">
       <view class="section-head">
         <text class="section-title">学习数据</text>
-        <text class="section-sub">本周</text>
+        <text class="section-sub">全部科目</text>
       </view>
-      <view class="card stats">
-        <view class="stat">
-          <text class="stat-num">{{ stat.total }}</text>
-          <text class="stat-label">累计做题</text>
-        </view>
-        <view class="stat-divider" />
-        <view class="stat">
-          <text class="stat-num">{{ stat.accuracy }}%</text>
-          <text class="stat-label">正确率</text>
-        </view>
-        <view class="stat-divider" />
-        <view class="stat">
-          <text class="stat-num">{{ stat.streak }}</text>
-          <text class="stat-label">连续打卡(天)</text>
+
+      <view v-if="dashboardLoading" class="card stats">
+        <LoadingSkeleton />
+      </view>
+      <view v-else-if="dashboardError" class="card error-card">
+        <text class="error-text">{{ dashboardError }}</text>
+        <view class="btn btn--primary error-btn" @click="loadDashboard">
+          <text class="btn--primary-text">重试</text>
         </view>
       </view>
 
-      <!-- 本周做题柱状（mock，P1 换 ECharts/图表） -->
-      <view class="card week">
-        <view class="week-bars">
-          <view v-for="w in stat.week" :key="w.day" class="week-col">
-            <view class="week-bar-track">
-              <view class="week-bar" :style="{ height: weekBarHeight(w.count) }" />
-            </view>
-            <text class="week-day">{{ w.day }}</text>
+      <template v-else-if="dashboard">
+        <!-- 汇总卡：做题量 / 正确率 / 掌握度 / 连胜 -->
+        <view class="card stats">
+          <view class="stat">
+            <text class="stat-num">{{ dashboard.totals.questions_practiced }}</text>
+            <text class="stat-label">累计做题</text>
+          </view>
+          <view class="stat-divider" />
+          <view class="stat">
+            <text class="stat-num">{{ Math.round(dashboard.totals.accuracy * 100) }}%</text>
+            <text class="stat-label">正确率</text>
+          </view>
+          <view class="stat-divider" />
+          <view class="stat">
+            <text class="stat-num">{{ Math.round(dashboard.mastery.mastery_pct * 100) }}%</text>
+            <text class="stat-label">掌握度</text>
+          </view>
+          <view class="stat-divider" />
+          <view class="stat">
+            <text class="stat-num">🔥{{ dashboard.streak.current }}</text>
+            <text class="stat-label">连胜(天)</text>
           </view>
         </view>
-      </view>
+
+        <!-- 趋势折线图（近 30 天做题量 + 正确率） -->
+        <view class="card trend">
+          <view class="trend-head">
+            <text class="trend-title">近 30 天趋势</text>
+            <text class="trend-sub">柱：做题量 · 线：正确率</text>
+          </view>
+          <TrendLineChart :items="trendItems" :width="chartWidth" />
+        </view>
+
+        <!-- 薄弱点 + 每科分解 -->
+        <view class="card weak-summary">
+          <view class="weak-summary-head">
+            <text class="weak-summary-title">薄弱点</text>
+            <text class="weak-summary-count">
+              <text class="weak-summary-count--danger">{{ dashboard.weak_points.weak }}</text> 薄弱 ·
+              <text class="weak-summary-count--warning">{{ dashboard.weak_points.consolidating }}</text> 待巩固
+            </text>
+          </view>
+          <view class="per-subject">
+            <view v-for="ps in dashboard.per_subject" :key="ps.subject_id" class="per-subject-row">
+              <text class="per-subject-name">{{ ps.subject_name }}</text>
+              <view class="per-subject-bar">
+                <view class="per-subject-fill" :style="{ width: Math.round(ps.mastery_pct * 100) + '%' }" />
+              </view>
+              <text class="per-subject-pct">{{ Math.round(ps.mastery_pct * 100) }}%</text>
+            </view>
+          </view>
+        </view>
+      </template>
     </view>
 
     <!-- 功能菜单 -->
     <view class="section">
       <view class="card menu">
-        <view v-for="item in menus" :key="item.label" class="menu-item" @click="onMenu(item.label)">
+        <view v-for="item in menus" :key="item.label" class="menu-item" @click="onMenu(item)">
           <text class="menu-icon">{{ item.icon }}</text>
           <text class="menu-label">{{ item.label }}</text>
           <text class="menu-arrow">›</text>
@@ -64,27 +101,53 @@
     </view>
 
     <view class="page-foot">
-      <text class="page-foot-text">AceExam v1.0.0 · M2 五件套</text>
+      <text class="page-foot-text">AceExam v1.0.0 · M3 体验增强</text>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { useSubjectStore } from "@/stores/subject";
 import { useAuthStore } from "@/stores/auth";
-import { mockPracticeStat } from "@/mock/stats";
+import { fetchDashboard, fetchDashboardTrend } from "@/api/dashboard";
+import type { DashboardSummary, TrendItem } from "@/types";
+import StreakBadge from "@/components/StreakBadge.vue";
+import TrendLineChart from "@/components/TrendLineChart.vue";
+import LoadingSkeleton from "@/components/LoadingSkeleton.vue";
 
 const subjectStore = useSubjectStore();
 const authStore = useAuthStore();
-// TODO(ep-backend): GET /api/v1/me/stats 就绪后接入 store，当前 mock
-const stat = mockPracticeStat();
 
-onShow(() => {
+const dashboard = ref<DashboardSummary | null>(null);
+const dashboardLoading = ref(false);
+const dashboardError = ref("");
+const trendItems = ref<TrendItem[]>([]);
+const chartWidth = ref(311); // 343 - 卡片 padding 32
+
+onShow(async () => {
   subjectStore.loadSubjects();
   authStore.refreshUser();
+  await loadDashboard();
 });
+
+async function loadDashboard() {
+  dashboardLoading.value = true;
+  dashboardError.value = "";
+  try {
+    const [d, t] = await Promise.all([
+      fetchDashboard(),
+      fetchDashboardTrend({ days: 30, granularity: "day" }),
+    ]);
+    dashboard.value = d;
+    trendItems.value = t.items;
+  } catch (e) {
+    dashboardError.value = (e as Error).message || "看板加载失败";
+  } finally {
+    dashboardLoading.value = false;
+  }
+}
 
 const nearestExam = computed(() => {
   const list = subjectStore.subjects;
@@ -93,29 +156,33 @@ const nearestExam = computed(() => {
   return `${nearest.name} ${nearest.examCountdown} 天`;
 });
 
-const maxWeekCount = Math.max(...stat.week.map((w) => w.count), 1);
-function weekBarHeight(count: number) {
-  return `${Math.max(8, Math.round((count / maxWeekCount) * 100))}%`;
-}
-
 const menus = [
-  { icon: "🗓️", label: "备考计划" },
-  { icon: "📕", label: "错题本" },
-  { icon: "📊", label: "学习数据" },
-  { icon: "⚙️", label: "设置" },
+  { icon: "🗓️", label: "备考计划", action: "plan" },
+  { icon: "📕", label: "错题本", action: "wrong" },
+  { icon: "🏆", label: "排行榜", action: "leaderboard" },
+  { icon: "🌳", label: "知识点图谱", action: "graph" },
+  { icon: "⚙️", label: "设置", action: "settings" },
 ];
 
-function onMenu(label: string) {
-  if (label === "备考计划") {
+function onMenu(item: { label: string; action: string }) {
+  if (item.action === "plan") {
     uni.navigateTo({ url: "/pages/plan/create" });
     return;
   }
-  if (label === "错题本") {
+  if (item.action === "wrong") {
     uni.switchTab({ url: "/pages/practice/index" });
     return;
   }
-  // TODO: M3 实现对应页面
-  uni.showToast({ title: `「${label}」将在 M3 提供`, icon: "none" });
+  if (item.action === "leaderboard") {
+    uni.navigateTo({ url: "/pages/leaderboard/index" });
+    return;
+  }
+  if (item.action === "graph") {
+    const sid = subjectStore.subjects[0]?.id || "";
+    uni.navigateTo({ url: `/pages/diagnose/graph?subjectId=${encodeURIComponent(sid)}` });
+    return;
+  }
+  uni.showToast({ title: "「设置」将在后续版本提供", icon: "none" });
 }
 
 function goLogin() {
@@ -212,7 +279,7 @@ function goLogin() {
   align-items: center;
 }
 .stat-num {
-  font-size: 40rpx;
+  font-size: 34rpx;
   font-weight: 800;
   color: $primary-600;
 }
@@ -227,40 +294,90 @@ function goLogin() {
   background: $neutral-100;
 }
 
-.week {
+/* 趋势图 */
+.trend {
   margin-top: 24rpx;
-  padding: 32rpx 24rpx;
+  padding: 24rpx;
 }
-.week-bars {
+.trend-head {
   display: flex;
-  align-items: flex-end;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+}
+.trend-title {
+  font-size: $font-body;
+  font-weight: 700;
+  color: $neutral-900;
+}
+.trend-sub {
+  font-size: 20rpx;
+  color: $neutral-300;
+}
+
+/* 薄弱 + 每科分解 */
+.weak-summary {
+  margin-top: 24rpx;
+  padding: 24rpx;
+}
+.weak-summary-head {
+  display: flex;
+  align-items: baseline;
   justify-content: space-between;
 }
-.week-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex: 1;
+.weak-summary-title {
+  font-size: $font-body;
+  font-weight: 700;
+  color: $neutral-900;
 }
-.week-bar-track {
-  height: 120rpx;
-  width: 32rpx;
-  background: $neutral-100;
-  border-radius: 8rpx;
-  display: flex;
-  align-items: flex-end;
-  overflow: hidden;
-}
-.week-bar {
-  width: 100%;
-  background: $primary-500;
-  border-radius: 8rpx;
-  transition: height 400ms ease-out;
-}
-.week-day {
+.weak-summary-count {
   font-size: 22rpx;
   color: $neutral-500;
-  margin-top: 12rpx;
+}
+.weak-summary-count--danger {
+  color: $danger-500;
+  font-weight: 700;
+}
+.weak-summary-count--warning {
+  color: $warning-500;
+  font-weight: 700;
+}
+.per-subject {
+  margin-top: 16rpx;
+}
+.per-subject-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 10rpx;
+}
+.per-subject-name {
+  width: 160rpx;
+  font-size: 22rpx;
+  color: $neutral-500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.per-subject-bar {
+  flex: 1;
+  height: 12rpx;
+  background: $neutral-100;
+  border-radius: 6rpx;
+  overflow: hidden;
+}
+.per-subject-fill {
+  height: 100%;
+  background: $primary-500;
+  border-radius: 6rpx;
+  transition: width 400ms ease-out;
+}
+.per-subject-pct {
+  width: 64rpx;
+  text-align: right;
+  font-size: 22rpx;
+  color: $neutral-900;
+  font-weight: 600;
 }
 
 /* 菜单 */
@@ -288,6 +405,21 @@ function goLogin() {
 .menu-arrow {
   font-size: 40rpx;
   color: $neutral-300;
+}
+
+.error-card {
+  padding: 32rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.error-text {
+  color: $danger-500;
+  font-size: $font-body;
+}
+.error-btn {
+  margin-top: 20rpx;
+  padding: 12rpx 48rpx;
 }
 
 .page-foot {

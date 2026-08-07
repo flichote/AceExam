@@ -30,10 +30,19 @@
 |---|---|
 | `SubjectPill` | 科目/知识点标签 |
 | `ProgressRing` | 掌握度进度环（400ms ease-out） |
-| `StreakBadge` | 连胜徽章 |
+| `StreakBadge` | 连胜徽章（🔥 N 天，M3） |
 | `EmptyState` | 空状态占位（无错题/无任务） |
 | `ErrorBoundary` | 错误/边界状态（加载失败重试） |
 | `LoadingSkeleton` | 骨架屏（刷题页/诊断页） |
+
+## M3 新增组件（2026-08-08 登记）
+
+| 组件 | 职责 | 关键交互 |
+|---|---|---|
+| `KnowledgeGraphTree` | 知识点图谱自绘 canvas 树（三级：章→节→知识点） | 节点状态着色；父节点展开/收起；点击节点 emit select → 题单/讲解入口 |
+| `TrendLineChart` | 近 N 天做题量 + 正确率趋势图（自绘 canvas） | 柱状 = 做题量、折线 = 正确率（null 桶跳过） |
+| `WarningList` | 挂科预警风险列表 | 整体风险条（高/中/低）+ 条目理由/建议/元信息；点击条目 emit select |
+| `StreakBadge` | 连胜徽章 | 🔥 N 天；variant: primary（深色底）/ light（浅色底） |
 
 ## 组件规范约定
 

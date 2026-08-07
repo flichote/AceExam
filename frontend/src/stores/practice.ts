@@ -61,7 +61,7 @@ export const usePracticeStore = defineStore("practice", {
       }
     },
 
-    async loadQuestions(subjectId_: string, count = 10) {
+    async loadQuestions(subjectId_: string, count = 10, kpId?: string) {
       this.subjectId = subjectId_;
       this.loading = true;
       this.error = "";
@@ -69,6 +69,7 @@ export const usePracticeStore = defineStore("practice", {
         const res: PracticeResponse = await fetchPracticeQuestions(subjectId_, {
           count,
           excludeIds: this.seenIds,
+          ...(kpId ? { knowledgePointId: kpId } : {}),
         });
         this.strategy = res.strategy;
         // 合并策略命中知识点到名称映射（题目只给 knowledge_point_id 时也能显示标签）

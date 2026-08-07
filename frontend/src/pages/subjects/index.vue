@@ -29,6 +29,19 @@
       />
     </view>
 
+    <!-- 挂科预警（M3：GET /me/warnings） -->
+    <view v-if="warningsReady && warnings.length" class="section">
+      <view class="section-head">
+        <text class="section-title">挂科预警</text>
+        <text class="section-sub">风险提示</text>
+      </view>
+      <WarningList
+        :warnings="warnings"
+        :overall-risk="overallRisk"
+        @select="goWarningPractice"
+      />
+    </view>
+
     <!-- 薄弱知识点速览 Top3 -->
     <view v-if="weakKps.length" class="section">
       <view class="section-head">
@@ -143,16 +156,24 @@ import { computed, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { useSubjectStore } from "@/stores/subject";
 import { usePlanStore } from "@/stores/plan";
-import type { SubjectStatus, KnowledgePointHit } from "@/types";
+import type { SubjectStatus, KnowledgePointHit, WarningItem, RiskLevel } from "@/types";
+import { fetchWarnings } from "@/api/warnings";
+import { fetchDashboard } from "@/api/dashboard";
 import LoadingSkeleton from "@/components/LoadingSkeleton.vue";
 import SubjectPill from "@/components/SubjectPill.vue";
 import ProgressRing from "@/components/ProgressRing.vue";
 import DailyPlanCard from "@/components/DailyPlanCard.vue";
+import WarningList from "@/components/WarningList.vue";
 
 const subjectStore = useSubjectStore();
 const planStore = usePlanStore();
 
 const statusBarHeight = ref(20);
+
+/** 挂科预警（M3） */
+const warnings = ref<WarningItem[]>([]);
+const overallRisk = ref<RiskLevel | null>(null);
+const warningsReady = ref(false);
 
 onLoad(() => {
   try {
@@ -166,7 +187,22 @@ onLoad(() => {
 onShow(() => {
   subjectStore.loadSubjects();
   planStore.loadActive();
+  loadWarnings();
+  loadStreak();
 });
+
+async function loadWarnings() {
+  try {
+    const res = await fetchWarnings();
+    warnings.value = res.items;
+    overallRisk.value = res.overall_risk;
+  } catch {
+    warnings.value = [];
+    overallRisk.value = null;
+  } finally {
+    warningsReady.value = true;
+  }
+}
 
 /** 状态 → 徽章文案 / 类型（docs/design/design-system.md 状态映射） */
 const statusText: Record<SubjectStatus, string> = {
@@ -183,9 +219,21 @@ const statusType: Record<SubjectStatus, string> = {
 };
 
 const subjectCount = computed(() => subjectStore.subjects.length);
-const maxStreak = computed(() =>
-  subjectStore.subjects.reduce((max, s) => Math.max(max, s.streak), 0)
-);
+const maxStreak = computed(() => {
+  if (dashboardStreak.value > 0) return dashboardStreak.value;
+  return subjectStore.subjects.reduce((max, s) => Math.max(max, s.streak), 0);
+});
+const dashboardStreak = ref(0);
+
+/** 首页连胜徽章：优先 GET /me/dashboard（M3），无则用科目 streak 兜底 */
+async function loadStreak() {
+  try {
+    const d = await fetchDashboard();
+    dashboardStreak.value = d.streak.current;
+  } catch {
+    dashboardStreak.value = 0;
+  }
+}
 
 /** 薄弱知识点速览（Top3，来自计划快照 weak_kps） */
 const weakKps = computed<KnowledgePointHit[]>(() => {
@@ -215,6 +263,15 @@ function goPracticeByKp(kp: KnowledgePointHit) {
   const sid = planStore.plan?.subject_id || subjectStore.subjects[0]?.id;
   if (sid) subjectStore.selectSubject(sid);
   uni.switchTab({ url: "/pages/practice/index" });
+}
+
+/** 预警条目 → 对应知识点练习 */
+function goWarningPractice(w: WarningItem) {
+  const sid = planStore.plan?.subject_id || subjectStore.subjects[0]?.id;
+  if (sid) subjectStore.selectSubject(sid);
+  uni.switchTab({
+    url: `/pages/practice/index?subjectId=${encodeURIComponent(sid || "")}&kpId=${encodeURIComponent(w.knowledge_point_id)}`,
+  });
 }
 
 function goCreatePlan(subjectId?: string) {

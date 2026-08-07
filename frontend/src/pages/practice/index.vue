@@ -1,5 +1,21 @@
 <template>
   <view class="page">
+    <!-- 考前突击入口（M3：考前 7 天自动提示 / 手动开启） -->
+    <view v-if="practice.subjectId" class="sprint-entry" @click="goSprint">
+      <view class="sprint-entry-left">
+        <text class="sprint-entry-icon">⚡</text>
+        <view class="sprint-entry-texts">
+          <text class="sprint-entry-title">考前突击模式</text>
+          <text class="sprint-entry-desc">
+            {{ sprintHint }}
+          </text>
+        </view>
+      </view>
+      <view class="sprint-entry-arrow">
+        <text class="sprint-entry-arrow-text">进入 →</text>
+      </view>
+    </view>
+
     <!-- 刷题信息栏 -->
     <view class="info">
       <view class="info-left">
@@ -122,9 +138,11 @@ const practice = usePracticeStore();
 const subjectStore = useSubjectStore();
 
 const pendingSubjectId = ref("");
+const pendingKpId = ref("");
 
 onLoad((options) => {
   pendingSubjectId.value = (options?.subjectId as string) || "";
+  pendingKpId.value = (options?.kpId as string) || "";
   init();
 });
 
@@ -142,17 +160,37 @@ async function init() {
     }
   }
   subjectStore.selectSubject(sid);
-  await practice.loadQuestions(sid);
+  await practice.loadQuestions(sid, 10, pendingKpId.value || undefined);
 }
 
 function reload() {
-  practice.loadQuestions(practice.subjectId || pendingSubjectId.value || subjectStore.currentSubjectId);
+  practice.loadQuestions(
+    practice.subjectId || pendingSubjectId.value || subjectStore.currentSubjectId,
+    10,
+    pendingKpId.value || undefined
+  );
 }
 
 const subjectName = computed(() => {
   if (!practice.subjectId) return "刷题";
   return subjectStore.subjectById(practice.subjectId)?.name ?? practice.subjectId;
 });
+
+/** 突击入口提示：临近考试自动激活文案（数据源：当前科目计划，缺省通用文案） */
+const sprintHint = computed(() => {
+  const s = subjectStore.subjectById(practice.subjectId);
+  if (s && s.examCountdown <= 7) {
+    return `距考试仅 ${s.examCountdown} 天，高频考点 + 错题冲刺`;
+  }
+  return "高频考点优先 + 个人错题回顾，考前冲刺利器";
+});
+
+function goSprint() {
+  if (!practice.subjectId) return;
+  uni.navigateTo({
+    url: `/pages/sprint/index?subjectId=${encodeURIComponent(practice.subjectId)}`,
+  });
+}
 
 const progress = computed(() => practice.progress);
 
@@ -175,6 +213,58 @@ function goAiExplain() {
 <style lang="scss">
 .page {
   min-height: 100vh;
+}
+
+/* 突击入口（primary 描边视觉） */
+.sprint-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 24rpx 32rpx 0;
+  padding: 24rpx 28rpx;
+  border-radius: $radius-card;
+  background: #ffffff;
+  border: 3rpx solid $primary-500;
+  box-shadow: 0 4rpx 16rpx rgba($primary-500, 0.12);
+}
+.sprint-entry-left {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.sprint-entry-icon {
+  font-size: 40rpx;
+  margin-right: 16rpx;
+}
+.sprint-entry-texts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sprint-entry-title {
+  font-size: $font-body;
+  font-weight: 800;
+  color: $primary-600;
+}
+.sprint-entry-desc {
+  font-size: 22rpx;
+  color: $neutral-500;
+  margin-top: 2rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sprint-entry-arrow {
+  flex-shrink: 0;
+  background: $primary-500;
+  border-radius: $radius-tag;
+  padding: 8rpx 20rpx;
+}
+.sprint-entry-arrow-text {
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: 700;
 }
 
 /* 顶部信息栏 */

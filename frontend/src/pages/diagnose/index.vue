@@ -48,6 +48,16 @@
         </view>
         <text class="last-report-arrow">›</text>
       </view>
+
+      <!-- 知识点图谱入口（M3） -->
+      <view class="card graph-entry" @click="goGraph">
+        <text class="graph-entry-icon">🌳</text>
+        <view class="graph-entry-texts">
+          <text class="graph-entry-title">知识点图谱</text>
+          <text class="graph-entry-desc">章 → 节 → 知识点，状态着色一眼看清</text>
+        </view>
+        <text class="graph-entry-arrow">›</text>
+      </view>
     </view>
 
     <!-- 薄弱知识点地图（P1 简化：列表） -->
@@ -122,6 +132,11 @@ async function start() {
 
 function goReport() {
   uni.navigateTo({ url: `/pages/diagnose/report?reportId=${diagnoseStore.reportId}` });
+}
+
+function goGraph() {
+  const sid = diagnoseStore.subjectId || subjectStore.subjects[0]?.id || "";
+  uni.navigateTo({ url: `/pages/diagnose/graph?subjectId=${encodeURIComponent(sid)}` });
 }
 
 /** 薄弱地图数据：计划快照 weak_kps（无计划时为空，引导自测） */
@@ -281,6 +296,39 @@ function onKpSelect() {
 .last-report-arrow {
   font-size: 40rpx;
   color: $neutral-300;
+}
+
+/* 知识点图谱入口（M3） */
+.graph-entry {
+  margin-top: 20rpx;
+  padding: 24rpx;
+  display: flex;
+  align-items: center;
+  border: 3rpx solid $primary-500;
+}
+.graph-entry-icon {
+  font-size: 40rpx;
+  margin-right: 16rpx;
+}
+.graph-entry-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.graph-entry-title {
+  font-size: $font-body;
+  font-weight: 700;
+  color: $primary-600;
+}
+.graph-entry-desc {
+  font-size: 22rpx;
+  color: $neutral-500;
+  margin-top: 2rpx;
+}
+.graph-entry-arrow {
+  font-size: 40rpx;
+  color: $primary-500;
 }
 
 .map-empty {
