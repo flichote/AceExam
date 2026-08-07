@@ -174,3 +174,149 @@ class TestFormulaExtraction:
         assert "极限定义" in text_only
         assert "是基础" in text_only
         assert "lim" not in text_only  # LaTeX removed
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# StructuredQuestion and KnowledgePointSuggestion dataclasses
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestStructuredQuestion:
+    """Test StructuredQuestion dataclass and parsing."""
+
+    def test_defaults(self):
+        from app.services.ocr_service import StructuredQuestion
+        sq = StructuredQuestion()
+        assert sq.type == ""
+        assert sq.content == ""
+        assert sq.options is None
+        assert sq.confidence == 0.0
+
+    def test_full_question(self):
+        from app.services.ocr_service import StructuredQuestion
+        sq = StructuredQuestion(
+            type="single",
+            content="求极限 $\\lim_{x\\to 0}\\frac{\\sin x}{x}$",
+            options={"A": "0", "B": "1", "C": "∞", "D": "不存在"},
+            answer={"correct": "B"},
+            analysis="重要极限：$\\lim_{x\\to 0}\\frac{\\sin x}{x}=1$",
+            confidence=0.92,
+            raw_ocr_text="求极限 lim sin(x)/x",
+        )
+        assert sq.type == "single"
+        assert "sin" in sq.content
+        assert sq.options is not None
+        assert sq.options["B"] == "1"
+        assert sq.answer == {"correct": "B"}
+        assert sq.confidence == 0.92
+
+
+class TestKnowledgePointSuggestion:
+    """Test KnowledgePointSuggestion dataclass."""
+
+    def test_defaults(self):
+        from app.services.ocr_service import KnowledgePointSuggestion
+        kps = KnowledgePointSuggestion()
+        assert kps.id == ""
+        assert kps.name == ""
+        assert kps.score == 0.0
+
+    def test_full_suggestion(self):
+        from app.services.ocr_service import KnowledgePointSuggestion
+        kps = KnowledgePointSuggestion(
+            id="kp-123",
+            name="洛必达法则",
+            score=0.92,
+        )
+        assert kps.name == "洛必达法则"
+        assert kps.score == 0.92
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# OCR JSON parsing (structure output)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestOCRJsonParsing:
+    """Test _parse_structure_json for LLM structure output."""
+
+    def test_parse_valid_json(self):
+        from app.services.ocr_service import OCRService
+        json_str = '{"type": "single", "content": "1+1=?", "confidence": 0.9}'
+        parsed = OCRService._parse_structure_json(json_str)
+        assert parsed is not None
+        assert parsed["type"] == "single"
+        assert parsed["confidence"] == 0.9
+
+    def test_parse_json_with_fence(self):
+        from app.services.ocr_service import OCRService
+        json_str = '```json\n{"type": "blank", "content": "填空", "confidence": 0.7}\n```'
+        parsed = OCRService._parse_structure_json(json_str)
+        assert parsed is not None
+        assert parsed["type"] == "blank"
+
+    def test_parse_invalid(self):
+        from app.services.ocr_service import OCRService
+        assert OCRService._parse_structure_json("不是 JSON") is None
+        assert OCRService._parse_structure_json("") is None
+
+    def test_parse_json_array(self):
+        from app.services.ocr_service import OCRService
+        json_str = '[{"name": "极限", "score": 0.9}, {"name": "导数", "score": 0.7}]'
+        parsed = OCRService._parse_structure_json(json_str)
+        assert isinstance(parsed, list)
+        assert len(parsed) == 2
+        assert parsed[0]["name"] == "极限"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Full pipeline data structures
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestOCRFullPipelineStructures:
+    """Test OCR pipeline output structures (no network)."""
+
+    def test_structure_question_empty_input(self):
+        """structure_question with empty OCR result returns defaults."""
+        import asyncio
+        from app.services.ocr_service import OCRService, OCRResult
+
+        async def _run():
+            svc = OCRService()
+            empty = OCRResult(success=False, error="no text")
+            sq = await svc.structure_question(empty)
+            assert sq.confidence == 0.0
+            assert sq.type == ""
+
+        asyncio.run(_run())
+
+    def test_suggest_kp_empty_input(self):
+        """suggest_knowledge_points with empty text returns empty list."""
+        import asyncio
+        from app.services.ocr_service import OCRService
+
+        async def _run():
+            svc = OCRService()
+            result = await svc.suggest_knowledge_points("")
+            assert result == []
+
+        asyncio.run(_run())
+
+    def test_ocr_service_has_new_methods(self):
+        """Verify the OCR service exposes the new pipeline methods."""
+        from app.services.ocr_service import OCRService, ocr_service
+        assert hasattr(ocr_service, "structure_question")
+        assert hasattr(ocr_service, "suggest_knowledge_points")
+        assert hasattr(ocr_service, "full_pipeline")
+        assert callable(ocr_service.structure_question)
+        assert callable(ocr_service.suggest_knowledge_points)
+
+    def test_onnx_config_present(self):
+        """OCR service should have ONNX config defined."""
+        from app.services.ocr_service import OCRService
+        cfg = OCRService._ONNX_CONFIG
+        assert "languages" in cfg
+        assert "mfd" in cfg
+        assert cfg["mfd"]["model_backend"] == "onnx"
+        assert cfg["formula"]["model_backend"] == "onnx"

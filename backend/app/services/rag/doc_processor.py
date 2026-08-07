@@ -5,8 +5,12 @@ Metadata (chapter, section, page) is preserved for citation display in RAG respo
 """
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -188,6 +192,77 @@ class DocProcessor:
         if buf.strip():
             result.append(buf.strip())
         return result or [text]
+
+    # ── PDF parsing ────────────────────────────────────────────────────
+
+    def chunk_pdf(self, file_path: str | Path, source: str) -> list[Chunk]:
+        """Extract text from a PDF file and chunk it.
+
+        Uses PyMuPDF (fitz) for text extraction.  Falls back to an empty
+        chunk list with a logged warning when PyMuPDF is not installed.
+
+        Strategy:
+          1. Open PDF with PyMuPDF
+          2. Extract text page by page, preserving page numbers
+          3. Concatenate and run through chunk_markdown
+          4. Page metadata is preserved per chunk (page of first paragraph)
+        """
+        fp = Path(file_path)
+        if not fp.exists():
+            logger.warning("PDF file not found: %s", fp)
+            return []
+
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            logger.warning(
+                "PyMuPDF (fitz) not installed — cannot parse PDF. "
+                "Install with: pip install pymupdf"
+            )
+            return []
+
+        try:
+            doc = fitz.open(str(fp))
+        except Exception as exc:
+            logger.warning("Failed to open PDF %s: %s", fp, exc)
+            return []
+
+        full_text_parts: list[str] = []
+        page_map: list[tuple[int, int]] = []  # (page_num, char_start, char_end)
+
+        try:
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                text = page.get_text("text")
+                if not text.strip():
+                    continue
+                start = sum(len(p) for p in full_text_parts)
+                full_text_parts.append(text)
+                end = start + len(text)
+                page_map.append((page_num + 1, start, end))
+        finally:
+            doc.close()
+
+        full_text = "\n\n".join(full_text_parts)
+        if not full_text.strip():
+            logger.warning("PDF %s produced no extractable text", fp)
+            return []
+
+        # Delegate to markdown chunking (PDF text is plain text, same split logic works)
+        chunks = self.chunk_markdown(full_text, source=source)
+
+        # Annotate chunks with page numbers from page_map
+        for chunk in chunks:
+            # Find which page(s) this chunk's text belongs to
+            # Use content_hash to approximately locate the chunk in full_text
+            chunk_start = full_text.find(chunk.chunk_text[:50]) if len(chunk.chunk_text) >= 50 else full_text.find(chunk.chunk_text)
+            if chunk_start >= 0:
+                for pg, p_start, p_end in page_map:
+                    if p_start <= chunk_start < p_end:
+                        chunk.page = str(pg)
+                        break
+
+        return chunks
 
 
 # ── module-level convenience ──

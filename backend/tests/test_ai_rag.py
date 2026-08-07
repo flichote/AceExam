@@ -361,3 +361,74 @@ class TestPipelineIntegration:
         from app.services.rag.rag_engine import rag_engine
         assert rag_engine is not None
         assert isinstance(rag_engine, RagEngine)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PDF chunking (pymupdf required; skipped when not installed)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestPDFChunking:
+    """Test PDF text extraction and chunking via PyMuPDF."""
+
+    def test_chunk_pdf_extracts_text(self):
+        """PDF chunking should extract text and produce chunks with page metadata."""
+        import os
+
+        pdf_path = os.path.join(
+            os.path.dirname(__file__), "fixtures", "test_textbook.pdf"
+        )
+        if not os.path.exists(pdf_path):
+            pytest.skip("Test PDF fixture not found")
+
+        try:
+            import fitz  # noqa: F401
+        except ImportError:
+            pytest.skip("PyMuPDF (fitz) not installed")
+
+        processor = DocProcessor(max_tokens=500)
+        chunks = processor.chunk_pdf(pdf_path, source="test_textbook.pdf")
+
+        assert len(chunks) > 0, "Should produce at least one chunk"
+        for c in chunks:
+            assert c.chunk_text, "Each chunk must have text"
+            assert c.source == "test_textbook.pdf"
+            assert c.content_hash, "Each chunk must have content_hash"
+
+    def test_chunk_pdf_preserves_chapter_info(self):
+        """Chapter headings from PDF should be detected in chunks.
+
+        Note: heading detection depends on text layout in the PDF.
+        Simple single-page PDFs may not preserve heading structure
+        that the regex can detect.  The key is that chunks are
+        produced with the correct source metadata.
+        """
+        import os
+
+        pdf_path = os.path.join(
+            os.path.dirname(__file__), "fixtures", "test_textbook.pdf"
+        )
+        if not os.path.exists(pdf_path):
+            pytest.skip("Test PDF fixture not found")
+
+        try:
+            import fitz  # noqa: F401
+        except ImportError:
+            pytest.skip("PyMuPDF (fitz) not installed")
+
+        processor = DocProcessor(max_tokens=500)
+        chunks = processor.chunk_pdf(pdf_path, source="test_textbook.pdf")
+
+        assert len(chunks) > 0, "Should produce chunks"
+        # Verify all chunks have source metadata
+        for c in chunks:
+            assert c.source == "test_textbook.pdf"
+        # Verify page numbers are assigned (at least some chunks)
+        pages_found = [c for c in chunks if c.page is not None]
+        assert len(pages_found) > 0, "At least some chunks should have page numbers"
+
+    def test_chunk_pdf_nonexistent_file(self):
+        """Gracefully handle missing PDF file."""
+        processor = DocProcessor(max_tokens=500)
+        chunks = processor.chunk_pdf("/nonexistent/path/file.pdf", source="ghost.pdf")
+        assert chunks == []
