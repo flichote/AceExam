@@ -68,7 +68,8 @@ class TestChatExplain:
         body = resp.json()
         assert body["session_id"]
         assert len(body["steps"]) >= 1
-        assert body["steps"][0]["title"] == "讲解"
+        # M2 行为：模型未返回结构化 steps 时走 fallback 标题 "Explanation"（T9 变更）
+        assert body["steps"][0]["title"] in ("讲解", "Explanation")
         assert "理解即可" in body["steps"][0]["content"]
         assert body["uncovered"] is False
 
@@ -159,5 +160,19 @@ class TestChatStream:
         assert resp.status_code == 200
         assert "text/event-stream" in resp.headers.get("content-type", "")
         body = resp.text
-        assert "片段A" in body
-        assert "[DONE]" in body
+        # M2 行为：SSE 事件为 JSON 格式（T9 变更），内容经 json.dumps 转义。
+        # 解析每个 data: 行并检查 delta 事件内容包含 mock 输出片段。
+        import json as _json
+
+        deltas = []
+        for line in body.splitlines():
+            if line.startswith("data: "):
+                try:
+                    evt = _json.loads(line[6:])
+                except _json.JSONDecodeError:
+                    continue
+                if evt.get("type") == "delta":
+                    deltas.append(evt.get("content", ""))
+        assert deltas, f"无 delta 事件: {body[:200]}"
+        assert any("片段A" in d for d in deltas)
+        assert "done" in body
