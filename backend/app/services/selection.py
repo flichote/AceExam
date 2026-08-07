@@ -8,10 +8,15 @@ import random
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import KnowledgePoint, Question, UserKnowledgeState
+
+
+def _is_postgres(db: AsyncSession) -> bool:
+    """当前会话方言是否为 PostgreSQL（用于 SQLite 本地开发的语法降级）。"""
+    return db.bind and db.bind.dialect.name == "postgresql"
 
 
 def status_factor(status: str) -> float:
@@ -157,8 +162,11 @@ async def select_practice_questions(
                 Question.id.notin_(exclude_uuids),
             )
             .order_by(
-                Question.difficulty
-                .op("<=>")(target_diff)  # type: ignore[operator]
+                # PG: `<=>` null-safe 等值比较（difficulty 越接近 target 越优先）
+                # SQLite: 不支持 <=>，降级为按难度绝对值距离排序（本地开发等价行为）
+                Question.difficulty.op("<=>")(target_diff)  # type: ignore[operator]
+                if _is_postgres(db)
+                else func.abs(Question.difficulty - target_diff),
             )
             .limit(questions_per_kp + 1)
         )

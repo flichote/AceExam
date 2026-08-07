@@ -7,6 +7,9 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1 import auth, chat, diagnose, health, ocr, plans, questions, subjects, wrong_answers
 from app.core.config import settings
+from app.db import sqlite_compat  # noqa: F401  本地 SQLite 兼容 shim（PG 下无副作用）
+
+sqlite_compat.apply_sqlite_compat()
 
 
 @asynccontextmanager

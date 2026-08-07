@@ -43,3 +43,6 @@ tmp/
 .cache/
 coverage/
 htmlcov/
+
+# --- Kanban dashboard (generated) ---
+kanban/kanban-dashboard.html
