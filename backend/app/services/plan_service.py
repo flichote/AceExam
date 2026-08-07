@@ -211,11 +211,7 @@ async def apply_answer(
     await db.execute(stmt)
     await db.commit()
 
-    # Re-fetch
-    result = await db.execute(
-        select(UserKnowledgeState).where(
-            UserKnowledgeState.user_id == user_id,
-            UserKnowledgeState.knowledge_point_id == knowledge_point_id,
-        )
-    )
-    return result.scalar_one()
+    # D-9 fix: refresh ORM object from DB (Core upsert bypasses identity map;
+    # expire_on_commit=False keeps stale cached attributes)
+    await db.refresh(state)
+    return state

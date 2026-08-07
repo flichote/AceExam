@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 class QuestionCreate(BaseModel):
     type: str = "single"
     content: str
-    options: dict | None = None
-    answer: dict | None = None
+    options: dict | list | None = None
+    answer: dict | str | list | None = None
     analysis: str | None = None
     difficulty: int = Field(default=3, ge=1, le=5)
     source: str | None = None
@@ -22,7 +22,7 @@ class QuestionResponse(BaseModel):
     knowledge_point_id: str | None = None
     type: str
     content: str
-    options: dict | None = None
+    options: dict | list | None = None
     difficulty: int
     source: str | None = None
     created_at: datetime
@@ -30,12 +30,12 @@ class QuestionResponse(BaseModel):
 
 class QuestionDetailResponse(QuestionResponse):
     """Includes answer/analysis only after submission."""
-    answer: dict | None = None
+    answer: dict | str | list | None = None
     analysis: str | None = None
 
 
 class SubmitAnswerRequest(BaseModel):
-    answer: dict
+    answer: dict | str | list
 
 
 class SubmitAnswerResponse(BaseModel):

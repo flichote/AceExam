@@ -227,9 +227,20 @@ async def submit_answer(
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
 
-    # Determine correctness
+    # Determine correctness — unwrap {type, value} envelope (D-8 fix)
     user_answer = body.answer
     correct_answer = question.answer
+
+    # Unwrap frontend envelope: {"type": "single", "value": "C"}
+    if isinstance(user_answer, dict) and "value" in user_answer:
+        user_answer = user_answer["value"]
+
+    # Normalize: some answers may be single-element lists
+    if isinstance(correct_answer, list) and len(correct_answer) == 1:
+        correct_answer = correct_answer[0]
+    if isinstance(user_answer, list) and len(user_answer) == 1:
+        user_answer = user_answer[0]
+
     correct = user_answer == correct_answer
 
     # Update knowledge state (streak + status machine)

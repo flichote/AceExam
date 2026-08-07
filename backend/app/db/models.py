@@ -5,7 +5,7 @@
 若两模块被同一进程同时 import 会出现表名重复注册，FastAPI 侧请以本模块为准或合并。
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -254,6 +254,36 @@ class AIExplanation(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     explanation: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class SprintSession(Base):
+    """考前突击会话（M3 新表，架构 §11.7-1 / §11.2）。
+
+    生命周期：active（突击中）→ completed（用户手动结束）/ expired（考试日已过）。
+    question_snapshot 为题单快照（items 题 id + tag 列表，防重复组卷/题目下线漂移，
+    重复请求返回同一份题单，api.md §11.3）。
+    """
+
+    __tablename__ = "sprint_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active','completed','expired')", name="ck_sprint_status"
+        ),
+        Index("ix_sprint_user_subject_status", "user_id", "subject_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subjects.id"), nullable=False)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    auto_activated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    expires_at: Mapped[date | None] = mapped_column(Date, nullable=True)  # 考试日（关联计划 exam_date 快照）
+    question_snapshot: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # [{"id","tag"}] 题单快照
+    high_freq_kps: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # 高频考点 top-N 快照
+    stats: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # 完成统计（做题数/正确数/正确率）
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class ChatSession(Base):

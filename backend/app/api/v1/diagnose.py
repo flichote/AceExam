@@ -213,8 +213,7 @@ async def submit_report(
             UserKnowledgeState.user_id == user.id,
             UserKnowledgeState.subject_id == report.subject_id,
         ).order_by(
-            UserKnowledgeState.status == "weak",
-            UserKnowledgeState.status == "consolidating",
+            (UserKnowledgeState.status == "weak").desc(),  # D-11 fix: True (weak) first
         )
     )
     states = state_result.scalars().all()
