@@ -241,10 +241,10 @@ PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m2_*.py -q
 - **影响**：报告推荐与自测表现相悖，薄弱项未优先。
 - **用例**：`test_m2_diagnose_flow.py::test_report_weak_top5_ranks_weakest_first`（xfail）。
 
-### D-12 [P2] M1 chat 测试回归（预存，T9 引入）
+### D-12 [P2] M1 chat 测试回归（预存，T9 引入）✅ 已修复（8a10e08）
 - **现象**：全量 2 个失败均为 `tests/test_api_chat.py`：`test_explain_success` 断言步骤标题 `讲解`、`test_explain_stream` 断言 SSE 明文 `片段A`。
 - **根因**：T9 修改 `chat.py`：非流式 fallback 标题 `讲解`→`Explanation`、SSE delta 用 `json.dumps`（ensure_ascii）转义非 ASCII。
-- **说明**：非本次引入（T12 开工前基线即失败）；M1 用例断言与 M2 新行为不一致，需 ep-backend 确认标题变更是否有意后同步更新用例。
+- **处置**：2026-08-08 确认 T9 变更为有意行为（SSE JSON 事件格式 + 模型未返回结构化 steps 时的英文 fallback 标题），同步更新测试断言以匹配新契约。chat 套件 8 passed。
 
 ### D-15 [P1] 自适应选题接口 500（ORDER BY pgvector `<=>`）
 - **现象**：`GET /subjects/{id}/practice/questions` 一旦有题即 500：`ORDER BY questions.difficulty <=> ?` 语法错误（SQLite 与 PostgreSQL integer 列均不支持）。
