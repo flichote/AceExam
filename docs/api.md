@@ -1,9 +1,9 @@
-# AceExam API 契约（M2）
+# AceExam API 契约（M3）
 
-> **状态**：M2 v1.0（2026-08-07）｜**作者**：ep-arch
-> **定位**：前后端对接的唯一依据（Pydantic schema 级字段定义）。模块设计见 [architecture](./architecture.md)（§10 M2 五件套）；表结构见 [database](./database.md)；需求见 [PRD](./PRD.md)。
+> **状态**：M3 v1.0（2026-08-08）｜**作者**：ep-arch
+> **定位**：前后端对接的唯一依据（Pydantic schema 级字段定义）。模块设计见 [architecture](./architecture.md)（§10 M2 五件套、§11 M3 图谱/突击/看板/排行/预警）；表结构见 [database](./database.md)；需求见 [PRD](./PRD.md)。
 > **评审**：接口契约由 ep-arch 评审后锁定；任何变更必须同步修改本文档 + 相关代码，禁止只改代码。
-> **覆盖范围**：M1 已交付端点（§1~§4 简述）+ M2 五件套端点（§5~§8 详述）+ 与 M1 差异总表（§9）。
+> **覆盖范围**：M1 已交付端点（§1~§4 简述）+ M2 五件套端点（§5~§8 详述）+ 与 M1 差异总表（§9）+ M2 实现备注（§10）+ M3 新增端点（§11）。
 
 ---
 
@@ -560,3 +560,239 @@ Query：`subject_id: string?`（缺省取最近活跃计划）
 - **T11（ep-frontend）**：按本契约对接；SSE 用 chunked 请求解析（§0.4）；错误码映射统一 toast；401 → 登录页。
 - **T12（ep-qa）**：按 §7.3 可解释性断言 + 五件套逐项验收（见 docs/ops/M2-taskgraph.md 验收清单）。
 - 变更流程：改端点/字段必须先改本文档 + architecture.md 对应小节，再改代码；评审由 ep-arch。
+
+---
+
+## 11. M3 增量：图谱 / 突击 / 看板 / 排行 / 预警 API
+
+> 本节是 M3 新增端点契约，在 M2（§1~§10）之上增量追加，不重写既有章节。模块设计见 architecture.md §11；表结构增量见 database.md §9（T14）。突击相关端点为会员功能（PRD §5/§6），免费用户 403 PAYMENT_REQUIRED。
+
+### 11.1 GET /subjects/{subject_id}/knowledge-graph（新增，知识点图谱）
+
+Query：
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| include_questions | bool | 否 | true | 节点带 question_count / practice_count / accuracy 统计；false 只返回树骨架 |
+
+鉴权：登录。
+响应 200：
+
+```json
+{
+  "subject_id": "uuid",
+  "subject_name": "高等数学",
+  "generated_at": "2026-08-08T12:00:00Z",
+  "root": {
+    "id": "uuid", "name": "第2章 导数与微分", "level": 1,
+    "status": "weak", "question_count": 37,
+    "children": [
+      {
+        "id": "uuid", "name": "2.3 求导法则", "level": 2, "status": "consolidating",
+        "question_count": 12,
+        "children": [
+          {
+            "id": "uuid", "name": "洛必达法则", "level": 3, "status": "weak",
+            "question_count": 8, "practice_count": 5, "accuracy": 0.2,
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "stats": {
+    "total_nodes": 96, "leaf_count": 28,
+    "mastered_count": 9, "weak_count": 6, "consolidating_count": 4, "untouched_count": 9
+  }
+}
+```
+
+- `status`：叶子 = `user_knowledge_states` 实时状态（无记录 = `untouched`）；父节点 = 子节点聚合（任一 weak→weak，任一 consolidating→consolidating，全部 mastered→mastered，否则 untouched；architecture.md §11.1）。
+- `accuracy`：仅叶子有练习记录时返回（0~1），未接触为 null；父节点为 null。
+- 前端可直接用 `root` 喂 ECharts `series-tree`（`data=[root]`，节点 `itemStyle.color` 按 status 映射）。
+- 错误：404（科目不存在）。
+
+### 11.2 POST /subjects/{subject_id}/sprint/activate（新增，手动激活突击）
+
+请求体：`{}`
+鉴权：会员（免费 403 PAYMENT_REQUIRED）。
+响应 200（幂等：同科目已有 active 会话返回既有）：
+
+```json
+{
+  "sprint": {
+    "id": "uuid", "subject_id": "uuid", "status": "active",
+    "activated_at": "2026-08-08T12:00:00Z",
+    "auto_activated": false,
+    "exam_date": "2026-08-15", "days_left": 7, "expires_at": "2026-08-15"
+  },
+  "created": true
+}
+```
+
+- 手动激活不限制距考试天数；无 active 计划时 `exam_date`/`days_left` 为 null（只开题单不联动倒计时）。
+- 幂等：同科目已有 active 会话 → `created: false` 返回既有；考试日已过 → 旧会话置 `expired` 并新建。
+- 错误：403 PAYMENT_REQUIRED、404（科目不存在）。
+
+### 11.3 GET /subjects/{subject_id}/sprint/questions（新增，突击题单）
+
+Query：
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| mode | string | 否 | review | `review` 混合题单 / `mock` 模拟卷 |
+| count | int | 否 | 20 | 题量 1..50（题池不足返回实际数量） |
+
+鉴权：会员。
+行为：无 active 会话且 `days_left ≤ 7` → 自动创建（`auto_activated=true`，architecture.md §11.2）。
+响应 200：
+
+```json
+{
+  "sprint_id": "uuid",
+  "status": "active",
+  "days_left": 7,
+  "high_freq_kps": [
+    {"id": "uuid", "name": "洛必达法则", "heat": 128, "avg_accuracy": 0.42, "has_past_exam": true}
+  ],
+  "items": [
+    {"id": "uuid", "subject_id": "uuid", "knowledge_point_id": "uuid", "type": "single",
+     "content": "…", "options": [{"key": "A", "text": "…"}], "difficulty": 3,
+     "source": "past_exam", "tag": "high_freq"}
+  ],
+  "summary": {"high_freq_questions": 14, "wrong_review_questions": 6, "deduped": 2, "total": 20},
+  "mock": null
+}
+```
+
+- `items` 为 QuestionPublic（不含 answer/analysis）；`tag`：`high_freq`（高频考点题）/ `wrong_review`（个人错题），前端可展示"本卷含 6 道你的错题"。
+- 题单快照：重复请求返回 `sprint_sessions.question_snapshot` 同一份题单（`sprint_id` 稳定）。
+- `mode=mock`：`mock` 返回 `{"duration_min": 120, "total_score": 100, "started_at": null}`（从 `subjects.config.exam` 读取），前端计时；判分仍走 `POST /questions/{id}/answers`。
+- 错误：403 PAYMENT_REQUIRED、404（科目不存在）、422（mode/count 非法）。
+
+### 11.4 GET /me/dashboard（新增，学习数据看板汇总）
+
+Query：`subject_id: string?`（缺省 = 全部科目汇总）
+鉴权：登录。
+响应 200：
+
+```json
+{
+  "totals": {"questions_practiced": 1280, "correct_count": 940, "accuracy": 0.734},
+  "mastery": {"leaf_total": 28, "mastered": 9, "mastery_pct": 0.321},
+  "streak": {"current": 5, "longest": 12},
+  "weak_points": {"weak": 6, "consolidating": 4},
+  "per_subject": [
+    {"subject_id": "uuid", "subject_name": "高等数学", "questions_practiced": 680,
+     "correct_count": 470, "accuracy": 0.691, "mastery_pct": 0.32}
+  ],
+  "exam": {"has_active_plan": true, "days_left": 7}
+}
+```
+
+- `mastery` 按叶子知识点口径（architecture.md §11.4）；`streak` 按 §11.3 连胜规则实时计算。
+- `exam.days_left`：最近 active 计划倒计时；无计划为 null（前端引导建计划）。
+- 错误：404（subject_id 不存在，若传）。
+
+### 11.5 GET /me/dashboard/trend（新增，时间序列）
+
+Query：
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| days | int | 否 | 30 | 回溯天数 1..180 |
+| subject_id | string | 否 | null | 缺省 = 全部科目 |
+| granularity | string | 否 | day | `day` / `week` / `month`（date_trunc 桶） |
+
+鉴权：登录。
+响应 200：
+
+```json
+{
+  "granularity": "day",
+  "items": [
+    {"bucket_start": "2026-07-10", "questions_practiced": 20, "correct_count": 15,
+     "accuracy": 0.75, "mastered_kp_count": 4, "mastery_pct": 0.14},
+    {"bucket_start": "2026-07-11", "questions_practiced": 0, "correct_count": 0,
+     "accuracy": null, "mastered_kp_count": 4, "mastery_pct": 0.14}
+  ]
+}
+```
+
+- 桶无做题记录：`questions_practiced=0`、`accuracy=null`（前端折线图跳过 null 或补 0，T16 定）。
+- `mastered_kp_count`：as-of 近似（状态 `updated_at ≤ 桶末` 计数，architecture.md §11.4），单调不减。
+- 桶按时间升序；`bucket_start` 格式 YYYY-MM-DD（week 桶为周一、month 桶为 1 号）。
+
+### 11.6 GET /leaderboard（新增，排行榜）
+
+Query：
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| scope | string | 否 | global | `global` / `subject` |
+| subject_id | string | subject 时必填 | null | 科目维度过滤 |
+| page / page_size | int | 否 | 1 / 20 | 分页（page_size ≤ 50） |
+
+鉴权：登录。
+响应 200：
+
+```json
+{
+  "scope": "global",
+  "items": [
+    {"rank": 1, "user_id": "uuid", "username": "zhangsan",
+     "total_correct": 860, "questions_practiced": 1150, "accuracy": 0.748,
+     "current_streak": 8}
+  ],
+  "page": 1, "page_size": 20, "total": 156,
+  "me": {"rank": 42, "total_correct": 180, "questions_practiced": 260, "accuracy": 0.692}
+}
+```
+
+- **口径（architecture.md §11.5 定案）**：主排序 `total_correct` 降序，次排序 `accuracy` 降序（样本 ≥ 30 题才计，<30 视为 0）；做题量 < 30 的用户不进榜；`accuracy < 0.1` 标 `suspicious` 不参与排序。
+- `me`：当前用户排名（不在榜时 `rank=null` 但附统计，前端显示"再对 N 题进榜"）。
+- 错误：422（scope=subject 缺 subject_id）。
+
+### 11.7 GET /me/warnings（新增，挂科预警）
+
+Query：`subject_id: string?`（缺省 = 全部有 active 计划的科目）
+鉴权：登录。
+响应 200：
+
+```json
+{
+  "overall_risk": "high",
+  "items": [
+    {
+      "knowledge_point_id": "uuid", "knowledge_point_name": "洛必达法则",
+      "risk_level": "high",
+      "reasons": ["正确率仅 20%（练习 5 次）", "距考试仅 7 天", "近 3 天未做题"],
+      "suggestion": "每天 2 道洛必达计算题，配合教材第 3 章例题；今晚先做一次 10 题小测",
+      "days_left": 7, "accuracy": 0.2, "practice_count": 5
+    }
+  ],
+  "generated_at": "2026-08-08T12:00:00Z"
+}
+```
+
+- 判定规则（architecture.md §11.6）：base(weak_count × days_left) + 趋势修正 ±1，clamp 低~高。
+- `reasons` 为规则层生成的确定性理由；`suggestion` 为 LLM（flash）措辞。可解释硬约束：等级/数字全部来自规则层，LLM 不得改写（与 §7.3 诊断同一原则）。
+- 无 active 计划：`{"overall_risk": null, "items": [], "generated_at": "…"}`（前端引导建计划）。
+- 错误：404（subject_id 不存在，若传）。
+
+### 11.8 差异总表（vs M2）与端点总数
+
+新增 7 个端点（全部新增，无修改/废弃）：
+
+`GET /subjects/{subject_id}/knowledge-graph`、`POST /subjects/{subject_id}/sprint/activate`、`GET /subjects/{subject_id}/sprint/questions`、`GET /me/dashboard`、`GET /me/dashboard/trend`、`GET /leaderboard`、`GET /me/warnings`
+
+> 合计：**35 端点**（M2 28 + M3 新增 7）。§9 差异表为 M2 快照，M3 增量以本节为准。
+
+### 11.9 实现备注（各角色）
+
+- **T15（ep-backend）**：按本契约实现路由与 schema；新增 `backend/app/schemas/`：`graph.py`（11.1）、`sprint.py`（11.2/11.3）、`dashboard.py`（11.4/11.5）、`leaderboard.py`（11.6）、`warnings.py`（11.7）。聚合查询用 SQLAlchemy `func.sum/date_trunc`；连胜统计抽纯函数 `streak.py`（便于 T18 单测，architecture.md §11.3）。顺手修复 M2 缺陷 D-8/D-9/D-11/D-16（见 T15 body）。
+- **T14（ep-db）**：仅 `sprint_sessions` 新表（architecture.md §11.7），其余 M3 功能无新表；迁移 `0003_m3_sprint`。
+- **T17（ep-ai）**：`knowledge_graph.py`（树组装+状态聚合）、`sprint.py`（高频识别+题单）、`warning.py`（风险规则+LLM 措辞）；单测覆盖 §11.6 风险边界与 §11.2 高频+错题交集。
+- **T16（ep-frontend）**：按本契约对接；图谱用 uni-echarts（H5/App renderjs，mp-weixin canvas 降级），节点点击 → 题单；趋势折线图用 ECharts line（uni-echarts 同组件）；`accuracy: null` 桶前端补零。
+- **T18（ep-qa）**：按 §11.6 风险等级边界、§11.3 连胜连续/中断、§11.2 高频+错题交集去重、§11.5 排序口径写断言（见 docs/ops/M3-taskgraph.md 验收清单）。
+- 变更流程：改端点/字段必须先改本文档 + architecture.md §11 对应小节，再改代码；评审由 ep-arch。

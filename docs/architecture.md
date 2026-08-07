@@ -1,9 +1,10 @@
 # AceExam 架构设计（M1 基线）
 
-> **状态**：M2 增量 v1.1（2026-08-07）｜**作者**：ep-arch
+> **状态**：M3 增量 v1.2（2026-08-08）｜**作者**：ep-arch
 > **定位**：本文件是系统设计的事实来源。需求唯一事实来源是 [PRD](./PRD.md)；视觉/交互见 [design/](./design/)；表结构与 API 契约分别以 [database](./database.md) 与 [api](./api.md) 为准（评审后锁定，变更走文档）。
 > **配套决策**：关键技术决策固化在 [docs/adr/](../adr/)（ADR-0001 ~ 0003）。
 > **M2 增量说明**：M1 基线（§1~§9）保持不动；MVP 五件套（智能刷题/AI 讲解/拍照录题/薄弱诊断/备考计划）的模块设计在 §10 增量追加，API 契约详版见 [docs/api.md](./api.md)。
+> **M3 增量说明**：§10 五件套保持不动；体验增强与增长功能（知识点图谱可视化 / 考前突击模式 / 打卡连胜 / 学习数据看板 / 排行榜 / 挂科预警）的模块设计在 §11 增量追加；API 契约增量见 [docs/api.md](./api.md) §11；表结构增量由 T14 落地 [docs/database.md](./database.md) §9；任务图见 [docs/ops/M3-taskgraph.md](./ops/M3-taskgraph.md)。
 
 ---
 
@@ -13,11 +14,12 @@
 |---|---|---|
 | `docs/PRD.md` | 需求唯一事实来源（功能分层/核心闭环/题库策略） | v0.1 已定 |
 | `docs/design/*` | 页面地图 / 设计系统 / 组件 / 交互流程 | 已定 |
-| **`docs/architecture.md`（本文）** | 系统模块划分、科目模板、RAG 管线、LLM 分级、API 骨架、ADR 索引、M2 五件套模块设计 | **M2 增量 v1.1** |
-| `docs/database.md` | 表结构（M1 基线；M2 增量由 T8 同步） | M1 已锁定，T8 增量 |
-| `docs/api.md` | API 契约详版（Pydantic 级字段定义 + M1/M2 差异表） | **M2 v1.0 已交付** |
+| **`docs/architecture.md`（本文）** | 系统模块划分、科目模板、RAG 管线、LLM 分级、API 骨架、ADR 索引、M2 五件套 + M3 图谱/突击/看板/排行/预警模块设计 | **M3 增量 v1.2** |
+| `docs/database.md` | 表结构（M1 基线；M2 §8 / M3 §9 增量） | M1 锁定，M2 §8 已交付，M3 §9 由 T14 |
+| `docs/api.md` | API 契约详版（Pydantic 级字段定义 + 各里程碑差异表） | **M3 v1.0（35 端点）** |
 | `docs/ops/M1-taskgraph.md` | M1 里程碑任务图与启动手册 | 已存在，T1 完善 |
 | `docs/ops/M2-taskgraph.md` | M2 里程碑任务图（T7~T12） | T7 产出 |
+| `docs/ops/M3-taskgraph.md` | M3 里程碑任务图（T13~T18） | T13 产出 |
 
 **规则**：接口契约（API 字段、表结构）由 ep-arch 评审后锁定；任何变更必须同步修改本文档 + 对应交付文档，禁止只改代码。
 
@@ -594,3 +596,244 @@ days_left = exam_date - today
 | `backend/tests/`、`docs/qa/` | T12 | 端到端验收测试 |
 
 > 冲突规避：`selection.py`/`subject_config.py` 归 T10；T9 路由只 import 调用，若 T10 未交付先按 §10.1 公式内联兜底（接口先行），T10 落地后替换并删除内联实现（卡片 comment 注明）。
+
+---
+
+## 11. M3 增量：体验增强与增长功能模块设计
+
+> 本节是 M3 的模块级设计，在 M1/M2 基线上增量追加（§1~§10 不重写）。**接口契约（字段级）以 [docs/api.md](./api.md) §11 为准；表结构变更以 [docs/database.md](./database.md)（T14 增量 §9）为准；任务图见 [docs/ops/M3-taskgraph.md](./ops/M3-taskgraph.md)。**
+> 对应 PRD §3 第二/三层：知识点图谱可视化 / 考前突击模式 / 学习数据看板 / 打卡连胜（第二层 体验增强）+ 排行榜 / 挂科风险预警（第三层 增长与壁垒）。
+
+**M3 设计总原则**：
+
+1. **统计类功能全部实时推导、不落快照表**（打卡连胜 / 排行榜 / 挂科预警 / 高频考点识别），唯一例外是突击会话 `sprint_sessions`（题单需稳定快照防重复组卷）。理由：MVP 数据量小，聚合查询毫秒级返回；少一张表少一处双写同步问题（与 §10.5 每日任务不落表同一决策风格）。
+2. **可解释硬约束延续**：排行榜口径、挂科风险等级全部由规则层确定性计算，LLM（flash）只生成措辞/建议，禁止编造数字（与 §10.4 诊断引擎同一原则）。
+3. **会员边界**：考前突击模式为会员功能（PRD §5/§6，免费用户 403 + 激活入口做引导）；图谱 / 看板 / 排行 / 预警 / 连胜登录即可看（留存与获客），突击作为付费钩子。
+
+### 11.1 知识点图谱可视化
+
+**数据源**：`knowledge_points`（三级树：章 level=1 / 节 level=2 / 知识点 level=3）+ `user_knowledge_states`（叶子状态）+ `questions`（每节点题量）。
+
+**节点状态聚合规则**（叶子 → 父节点）：
+
+| 节点 | 状态来源 |
+|---|---|
+| level=3 叶子知识点 | 直接读 `user_knowledge_states.status`（无记录 = `untouched`） |
+| level=2 节 / level=1 章 | 聚合子节点：任一子节点 `weak` → `weak`；否则任一 `consolidating` → `consolidating`；全部 `mastered` → `mastered`；否则 `untouched` |
+
+> 聚合取"最差子节点优先"，语义是"该章/节下还有薄弱点没补"，引导用户点进去补。
+
+**每节点附带统计**（叶子）：`question_count`（该知识点 active 题数）、`practice_count`、`accuracy`（correct/(correct+wrong)，无记录为 null）、`status`；父节点带 `question_count`（子树题量求和）。
+
+**前端可视化方案（context7 验证 2026-08，查询记录见卡片 comment）**：
+
+- 图表库选型：**ECharts `series-tree`**（官方 `/apache/echarts-doc` 确认：树图支持逐节点 `itemStyle.color`、`symbolSize`、`expandAndCollapse`、`initialTreeDepth`、`roam`——正好覆盖三级图谱 + 状态着色 + 展开收起）。**不选 `series-graph`**（关系图需手工 layout，树形数据无必要）。
+- uni-app 适配（官方 `/dcloudio/unidocs-zh` 确认）：**renderjs 可让 ECharts 跑在 App/H5 视图层**（直接操作 canvas、无逻辑层通信折损），但**小程序端无 renderjs**，官方建议小程序用 canvas 图表组件。
+- **定案**：H5 / App → `@xiaohe0601/uni-echarts`（context7 `/xiaohe0601/uni-echarts`：Vue3 封装、`setOption()` API、支持 web/mp-*/app 全端、`autoresize` + `click` 事件），内部走 renderjs + ECharts；mp-weixin → 同一组件降级 canvas 绘制（该库已支持 BuiltInPlatform 含 mp-weixin）；**最终兜底** = 自绘 canvas 树（三级固定布局，逻辑简单，T16 实现，不增包体）。
+- **节点着色**（状态语义固定，色值以 design-system 语义 token 为准，T16 落地时若缺失则补充 token）：
+
+| status | 语义 | 颜色 |
+|---|---|---|
+| `mastered` | 已掌握 | 绿 |
+| `weak` | 薄弱 | 红 |
+| `consolidating` | 待巩固 | 橙 |
+| `untouched` | 未接触 | 灰 |
+
+- **交互**：点击叶子节点 → 该知识点题单（复用 `GET /questions?knowledge_point_id=`）或讲解入口；章/节节点展开/收起（ECharts `expandAndCollapse`，初始展开到第 2 级 `initialTreeDepth: 2`）。
+- **API**：`GET /subjects/{subject_id}/knowledge-graph` 返回**嵌套 children 树**（ECharts tree 直接消费，前端零转换），见 api.md §11.1。
+- **代码文件**：`backend/app/services/knowledge_graph.py`（T17，树组装 + 状态聚合）；路由（T15，api/v1 下新增或并入 subjects）。
+
+### 11.2 考前突击模式（sprint）
+
+**激活规则**：
+
+- 自动激活：该科目存在 active 计划且 `days_left ≤ 7` → `GET /subjects/{subject_id}/sprint/questions` 首次访问时自动创建突击会话（`auto_activated=true`），前端提示"考前 7 天，进入突击模式"。
+- 手动激活：`POST /subjects/{subject_id}/sprint/activate` 任意时间可开（考前 1 天也能开，不设限制）。
+- 会员边界：**突击为会员功能**；免费用户 403（前端展示激活入口做会员引导）。自动激活对免费用户仅展示提示。
+- 幂等：同科目已有 active 会话 → 返回既有（不重复创建）；考试日已过 → 旧会话置 `expired`，可重新激活。
+
+**高频考点识别（数据来源 = 做题统计，规则版，无新表）**：
+
+```
+输入：user_knowledge_states（全体用户，按科目过滤）实时聚合
+  heat_kp(kp)  = SUM(correct_count + wrong_count)   -- 全体作答热度（出现频次）
+  avg_acc(kp)  = SUM(correct_count) / heat_kp       -- 全体平均正确率
+真题权重：questions.source='past_exam' 且 knowledge_point_id=kp 的题数
+高频考点 top-N = 按 heat_kp 降序取 heat_kp ≥ 阈值(默认 20 次) 且 avg_acc < 0.75 的知识点；
+              叠加真题权重（有真题的考点升序档位）→ 综合排序
+冷启动兜底：全体作答不足 → 退化为"题库中 source='past_exam' 题量最多的知识点"（真题即高频的合理代理）；
+          仍无 → 全部薄弱/待巩固知识点。
+```
+
+> 数据规模说明：不做离线批处理，实时聚合（MVP 量级 OK）；后续数据量大再上缓存表（§11.5 预留 `leaderboard_snapshots` 同机制）。
+
+**突击题单生成**（sprint.py，T17）：
+
+```
+题单 = 高频考点题 ∪ 个人错题（交集去重、限量、按考点分布）
+1. 高频考点题：每个高频考点从 questions(active) 抽 difficulty 适配题（复用 §10.1 difficulty_factor 排序），每考点 ≤ 3 题
+2. 个人错题：wrong_answers 未 mastered 且属于该科目 → 按考点去重，每考点 ≤ 2 题（错题必须优先，用户已错过）
+3. 合并去重（question_id 唯一），限量 count（默认 20，1..50）
+4. 分布约束：高频考点覆盖 ≥ 70% 题量，剩余给错题
+5. 快照：生成结果写 sprint_sessions.question_snapshot（题单稳定，重复请求返回同一快照）
+```
+
+- **模拟卷**：`GET /subjects/{subject_id}/sprint/questions?mode=mock` → 从快照按 `subjects.config.exam`（duration_min/total_score）组卷返回（同结构 items + `mock` 元数据），前端计时答题；MVP 复用刷题提交链路（`POST /questions/{id}/answers`），不做独立判卷。
+- **API**：见 api.md §11.2/§11.3；**表**：`sprint_sessions`（§11.7）。
+- **代码文件**：`backend/app/services/sprint.py`（T17，高频识别 + 题单生成 + 激活）；路由 `backend/app/api/v1/sprint.py`（T15，调用 T17 服务；T17 未交付先按本规则内联兜底，T17 落地后替换并删除内联——沿用 §10.1 约定，禁止双实现长期并存）。
+
+### 11.3 打卡连胜（streak）
+
+**数据结构确认**：现有 `study_sessions` 已可支撑连胜统计（**T14 无需新表**）——
+
+- `UNIQUE(user_id, session_date)`：每用户每天至多一行；
+- `checked_in` + `checked_in_at`（M2 已加）：打卡事实；
+- 判定只需要"按日期的 checked_in=true 序列"，无需额外快照。
+
+**连续打卡判定规则（确定版，T18 断言依据）**：
+
+```
+输入：用户 checked_in=true 的 session_date 集合 S（升序）
+current_streak（当前连胜）：
+  1. 取最近打卡日 last = max(S)
+  2. 若 last == today 或 last == yesterday → 连胜未断，从 last 往前数连续天数
+  3. 若 last < yesterday（昨天和今天都没打）→ current_streak = 0（中断）
+longest_streak（历史最佳）：S 按日期排序，相邻日期间隔 == 1 天则累计，否则断开重计，取最大段长
+中断判定规则（一句话）：相邻两次打卡间隔 ≥ 2 天即断；今天还没打不算断（今天打了/昨天打了都算未断）
+```
+
+- 时区：`session_date` 为 DATE，日界按**用户时区**（MVP 固定 Asia/Shanghai；`checked_in_at` 落库为 UTC，展示与"今天/昨天"计算统一按东八区——与 api.md 时间约定一致，T15 实现时统一 `tz=Asia/Shanghai`）。
+- 实现：单用户 `SELECT session_date FROM study_sessions WHERE user_id=:uid AND checked_in=true ORDER BY session_date DESC` → 内存 O(n) 遍历（n=打卡天数，MVP 毫秒级）；不需要 SQL 窗口函数（可读性优先）。抽纯函数 `streak.py: compute_streak(dates: list[date]) -> (current, longest)` 便于 T18 单测。
+- 展示：首页/我的 Tab 连胜徽章 `🔥 N 天`（T16）；数据来自 `GET /me/dashboard`（api.md §11.4）。
+
+### 11.4 学习数据看板（dashboard）
+
+**汇总（GET /me/dashboard）聚合查询设计**：
+
+| 指标 | 数据来源 | 计算 |
+|---|---|---|
+| 总做题量 | study_sessions | `SUM(questions_practiced)`（可带 subject_id 过滤） |
+| 总正确数 / 正确率 | study_sessions | `SUM(correct_count) / SUM(questions_practiced)` |
+| 掌握度 | user_knowledge_states | 叶子知识点中 `mastered` 占比（按科 = 该科叶子 KP 数） |
+| 当前连胜 / 历史最佳 | §11.3 | 实时推导 |
+| 薄弱点计数 | user_knowledge_states | status ∈ {weak, consolidating} 的叶子 KP 数 |
+| 每科目分解 | 同上按 subject_id GROUP BY | `per_subject[]`（做题量 / 正确率 / 掌握度） |
+
+**时间序列（GET /me/dashboard/trend）聚合查询设计**：
+
+```
+按粒度 group by 桶（date_trunc）：
+  granularity=day   → date_trunc('day', session_date)    （days ≤ 31）
+  granularity=week  → date_trunc('week', session_date)   （ISO 周，周一为界）
+  granularity=month → date_trunc('month', session_date)
+每桶指标：questions_practiced / correct_count / accuracy
+掌握度曲线（as-of 近似，MVP 无历史状态快照）：
+  mastered_kp_count(bucket) = COUNT(user_knowledge_states WHERE status='mastered'
+                                    AND updated_at <= bucket_end)   -- 以状态最后更新时间近似"当时掌握度"
+  mastery_pct = mastered_kp_count / 该科叶子 KP 总数
+空数据边界：无记录的桶返回 0 值行（questions_practiced=0, accuracy=null；前端补零，接口只返回有数据 + 首尾桶）
+```
+
+- SQL 骨架（T15 参考）：`SELECT date_trunc(:gran, session_date) AS bucket, SUM(questions_practiced), SUM(correct_count) FROM study_sessions WHERE user_id=:uid [AND subject_id=:sid] AND session_date >= :start GROUP BY bucket ORDER BY bucket`。
+- **API**：见 api.md §11.4/§11.5。**无新表**。
+
+### 11.5 排行榜（leaderboard）
+
+**口径定案（评审决策 2026-08-08，T15/T18 依据）**：
+
+- **主排序 = 累计正确题数**（total_correct，全科目或按科过滤）；**次排序 = 正确率**（accuracy，仅当样本量 ≥ 30 题才参与排序，<30 视为 0）；展示列：名次 / 用户 / 做题量 / 正确率 / 连续天数（连胜仅展示，不参与排序）。
+- 理由：纯做题量 → 鼓励刷水题刷量，噪音大；纯正确率 → 1 题 100% 就霸榜，无意义；纯连续天数 → 只奖励打卡不奖励产出。累计正确题数 = "有效产出"，最接近产品目标（通过考试靠做对题），且天然防"刷量不改对"；同分用正确率打破平局（≥30 题门槛保证样本可信）。
+- 防作弊/防噪音：**做题量 < 30 题的用户不进榜**（新用户保护）；正确率 < 0.1 视为异常（疑似乱答），标 `suspicious` 不参与排序。
+- **维度**：`scope=global`（全部用户）｜`scope=subject`（按科目过滤，`subject_id` 必填）。**班级维度 M3 不做**：当前数据模型无班级/成员关系表（users 无 class_id），班级榜需要 classes/memberships 建模 + 邀请/审核流，划入 V2（PRD 第三层"班级排行榜"）。M3 的 global 榜已覆盖"同学间比一比"的主要场景。
+- **实现方案（T14 决策输入）**：**纯查询方案，不建聚合表/物化视图**。MVP 用户量小，实时聚合（study_sessions 按用户 GROUP BY + §11.3 连胜）毫秒级；缓存收益低。预留：用户量 > 1k 或查询 > 100ms 时加 `leaderboard_snapshots`（每日快照：user_id / subject_id / total_correct / accuracy / streak，定时任务刷新，接口只读快照）——M3 不建，见 §11.7 预留项。
+- **API**：见 api.md §11.6；分页沿用统一格式。
+
+### 11.6 挂科预警（warning）
+
+**设计原则**：与诊断引擎同构——**风险等级由规则层确定性计算，LLM（flash）只生成理由措辞**；每条预警必须可解释（为什么是这个等级）。
+
+**输入**：该科目 active 计划的 `exam_date`（无计划则无预警，前端引导建计划）+ `user_knowledge_states`（薄弱/待巩固点）+ 近 7 天练习趋势（study_sessions）。
+
+**风险等级判定规则（确定版，T17 实现 + T18 断言边界）**：
+
+```
+基础分 base = f(weak_count, days_left)：
+  weak_count = 该科 status ∈ {weak, consolidating} 的叶子知识点数
+
+  days_left ≤ 7:
+      weak_count ≥ 3        → 高
+      weak_count ∈ [1,2]    → 中
+      weak_count = 0        → 低
+  7 < days_left ≤ 14:
+      weak_count ≥ 6        → 高
+      weak_count ∈ [3,5]    → 中
+      weak_count ≤ 2        → 低
+  days_left > 14:
+      weak_count ≥ 10       → 高
+      weak_count ∈ [5,9]    → 中
+      weak_count ≤ 4        → 低
+
+修正（加减一档，clamp 到 [低, 高]）：
+  +1 档：近 7 天有 ≥ 3 天未做任何题（做题量 = 0）→ 停滞
+  -1 档：近 7 天做题 ≥ 目标量且正确率 ≥ 0.8 → 趋势向好
+科目整体风险 = max(各条目风险)；同时输出条目级预警
+```
+
+- 条目级输出：`{knowledge_point_id, name, risk_level, reasons[]（规则生成：正确率 x%、练习 y 次、距考 z 天、近 7 天做题 w 题）, suggestion（LLM flash 生成，如"每天 2 道洛必达 + 教材 3.2 节回顾"）}`。
+- **不落表**：预警是实时推导的瞬态视图（每天看结果一致），无历史/推送需求 → 复用现有表实时计算；若 V2 要"预警推送/历史趋势"再建 `risk_alerts` 表（§11.7 预留项）。
+- **API**：见 api.md §11.7；**代码文件**：`backend/app/services/warning.py`（T17，规则层 + LLM flash 措辞）；路由 `backend/app/api/v1/warnings.py`（T15，或并入 me 路由）。
+
+### 11.7 M3 表结构增量（与 ep-db 的约定，T14 实现）
+
+> 架构层面锁定以下表/字段需求；DDL 与迁移由 T14 落地 `backend/alembic/versions/0003_*.py` 并同步更新 `docs/database.md` §9（评审后锁定，禁止手改）。
+
+1. **`sprint_sessions`（新表，M3 唯一新表）**：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | UUID PK | |
+| user_id | UUID FK → users.id | |
+| subject_id | UUID FK → subjects.id | |
+| activated_at | TIMESTAMPTZ | 激活时间 |
+| auto_activated | BOOL DEFAULT false | 自动（考前 7 天）/ 手动 |
+| status | VARCHAR(20) CHECK | `active` / `completed` / `expired` |
+| expires_at | DATE | 考试日（关联计划 exam_date 快照） |
+| question_snapshot | JSONB | 题单快照（items 题 id 列表，防重复组卷/题目下线漂移） |
+| high_freq_kps | JSONB | 高频考点 top-N 快照（展示"本卷覆盖高频考点"） |
+| stats | JSONB | 完成统计（做题数/正确数/正确率，可选） |
+| created_at / updated_at | TIMESTAMPTZ | |
+
+索引：`ix_sprint_user_subject_status (user_id, subject_id, status)`。同一时刻每用户每科目至多一个 `active`（T15 先查后建 + 幂等；不建部分唯一索引，简单为先）。
+
+2. **打卡连胜**：**无新表无新字段**（确认 study_sessions 支撑，§11.3）。
+3. **排行榜**：**无新表**（纯查询，§11.5）；预留 `leaderboard_snapshots` 字段草案：`(user_id, subject_id, total_correct, accuracy, current_streak, snapshot_date)` + UNIQUE(user_id, subject_id, snapshot_date)——M3 不建。
+4. **挂科预警**：**无新表**（实时推导，§11.6）；预留 `risk_alerts` 字段草案：`(user_id, subject_id, knowledge_point_id, risk_level, reasons JSONB, triggered_at, handled)`——M3 不建。
+5. **高频考点识别**：**无新表**（从 user_knowledge_states 实时聚合，§11.2）。
+
+### 11.8 M3 新增/调整的代码文件总览（角色边界）
+
+| 文件 | 归属 | 说明 |
+|---|---|---|
+| `backend/app/services/knowledge_graph.py` | T17 | 图谱树组装（三级）+ 节点状态聚合（§11.1） |
+| `backend/app/services/sprint.py` | T17 | 高频考点识别 + 突击题单生成 + 激活逻辑（§11.2） |
+| `backend/app/services/warning.py` | T17 | 挂科风险规则层 + LLM flash 措辞（§11.6） |
+| `backend/app/services/streak.py` | T15 | 连胜统计纯函数（§11.3，独立纯函数便于 T18 单测） |
+| `backend/app/api/v1/sprint.py`、`dashboard.py`（或 me.py）、`leaderboard.py`、`warnings.py`、`knowledge_graph.py` | T15 | M3 新路由（§11 各小节 + api.md §11） |
+| `backend/app/db/`、`backend/app/models/`、`backend/alembic/versions/0003_*.py` | T14 | sprint_sessions 新表迁移 |
+| `frontend/` | T16 | 图谱可视化（uni-echarts/renderjs/canvas）、突击页、看板页、排行榜页、预警卡片、连胜徽章 |
+| `backend/tests/`、`docs/qa/` | T18 | M3 验收测试（含 §11.3 连胜中断 / §11.6 风险边界断言） |
+
+> 冲突规避：`sprint.py`/`warning.py`/`knowledge_graph.py` 归 T17；T15 路由只 import 调用，若 T17 未交付先按 §11.2/§11.6 规则内联兜底（接口先行），T17 落地后替换并删除内联实现（卡片 comment 注明）。
+
+### 11.9 M3 决策锁定表
+
+| # | 决策 | 定案 |
+|---|---|---|
+| D1 | 图谱可视化选型 | ECharts `series-tree` + uni-echarts（renderjs：H5/App；canvas：mp-weixin），兜底自绘 canvas |
+| D2 | 排行榜口径 | 主=累计正确题数，次=正确率（≥30 题门槛），连胜仅展示；做题量 < 30 不进榜 |
+| D3 | 排行榜维度 | global + subject；班级维度 V2（需 classes/memberships 建模） |
+| D4 | 统计类是否落表 | 连胜 / 排行榜 / 预警 / 高频考点全部实时推导不落表；唯一新表 `sprint_sessions`（题单快照） |
+| D5 | 突击会员边界 | 突击为会员功能（免费 403）；自动激活对免费用户仅展示引导 |
+| D6 | 挂科预警判定 | 规则层 base(weak_count × days_left) + 趋势修正 ±1，clamp 低~高；LLM 只生成理由措辞 |
+| D7 | 连胜判定 | 最近打卡日 = today 或 yesterday 则未断；间隔 ≥ 2 天即断；时区 Asia/Shanghai 日界 |
+| D8 | 掌握度曲线口径 | as-of 近似：mastered 状态 `updated_at ≤ 桶末` 计数 |
