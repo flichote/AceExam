@@ -3,6 +3,7 @@
 > **适用场景**：个人电脑（Win11）clone 仓库 + 重建角色后，一键启动 M1 开发。
 > **前置**：`bash hermes/setup-roles.sh` 已跑通（6 个 ep-* 角色就绪），主 profile 网关在跑。
 > **M1 目标**（PRD §8）：数据库表设计（题库/知识点图谱/向量表）+ AI 服务骨架 + uni-app 脚手架。
+> **M2 任务图**：M1 完成后，M2（MVP 五件套，T7~T12）见 [M2-taskgraph](./M2-taskgraph.md)。
 
 ## 任务图设计
 
