@@ -16,6 +16,16 @@ AceExam 的 6 个 Hermes 开发角色配置，**随私有仓库分发**，可在
 
 运维角色复用 CCN 团队的 `devops`（不重复创建）。
 
+## 个人电脑（Win11）前置条件
+
+> 脚本已在 Windows（git-bash）实测通过，Win10/Win11 行为一致。个人电脑首次需要：
+
+1. **安装 Git for Windows**（自带 git-bash，脚本用它跑）：https://git-scm.com/download/win
+2. **安装 Hermes**（安装器会自动装 Python 环境）：`curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`
+3. **配置 GitHub 认证**（私有仓库克隆需要）：HTTPS PAT 写入 `~/.git-credentials`，或安装 gh CLI 登录
+4. **首次运行 hermes setup** 配置主 profile（DeepSeek API key + context7 MCP）
+5. 确认 `hermes` 命令在 git-bash 的 PATH 中（安装后重开终端生效）
+
 ## 在个人电脑上恢复（3 步）
 
 ```bash
@@ -32,6 +42,8 @@ cd AceExam
 bash hermes/setup-roles.sh
 #    如需指定其他源 profile：bash hermes/setup-roles.sh --src 其他profile
 ```
+
+> 💡 若 Hermes 装在非默认路径，先 `export HERMES_HOME=<你的hermes目录>` 再跑脚本（脚本已支持）。
 
 ## 验证
 
