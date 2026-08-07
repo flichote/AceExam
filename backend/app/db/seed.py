@@ -1,18 +1,21 @@
-"""AceExam M1 种子数据脚本（ep-db 交付，纯 SQLAlchemy，不依赖 FastAPI）。
+"""AceExam M1/M2 种子数据脚本（ep-db 交付，纯 SQLAlchemy，不依赖 FastAPI）。
 
 用法（backend/ 目录下）：
-    DATABASE_URL=postgresql+psycopg://aceexam:aceexam@localhost:5432/aceexam \
+    DATABASE_URL=postgresql+psycopg://aceexam:aceexam@localhost:5432/aceexam \\
         python -m app.db.seed            # 幂等：已存在科目则跳过
     python -m app.db.seed --reset        # 清空全部业务表后重建种子
 
-种子内容（M1）：
+种子内容：
   - subjects：高数(math_gaoshu) + 英语(eng_college)，含 subjects.config 模板配置
   - knowledge_points：每科 ≥3 章 × ≥5 知识点（章→知识点两级）
   - questions：每科 ≥30 题，含 answer + analysis，可直接刷
+  - document_chunks（M2 补充）：高数教材示例分块语料（source='textbook'，
+    embedding 置空由后台 embedder 回填），供 RAG 讲解/dev 检索使用
 
-数据事实来源：docs/database.md §2（表结构）、§3（枚举/config 格式）。
+数据事实来源：docs/database.md §2（表结构）、§3（枚举/config 格式）、§8（M2 增量）。
 """
 import argparse
+import hashlib
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +30,7 @@ from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 
 from app.db import models  # noqa: E402
 from app.db.models import (  # noqa: E402
+    DocumentChunk,
     KnowledgePoint,
     Question,
     Subject,
@@ -44,6 +48,7 @@ MATH_GAOSHU = {
     "code": "math_gaoshu",
     "name": "高等数学",
     "description": "高等数学（同济版）公共课：极限、导数、积分三大主线，期末通关门面科目。",
+    "doc_source": "高等数学（同济第七版）",
     "config": {
         "prompt_templates": {
             "explain": "你是高等数学助教，请基于引用教材分步讲解，公式用 LaTeX。",
@@ -114,6 +119,24 @@ MATH_GAOSHU = {
                 ("定积分的应用（面积）", "平面图形面积 A=∫|f(x)-g(x)|dx，旋转体体积。"),
             ],
         },
+    ],
+    # 示例教材分块语料（M2：RAG 讲解可溯源；embedding 置空，由后台 embedder 回填）
+    # 每条：(chapter, section, page, chunk_text)
+    "doc_chunks": [
+        ("第1章 函数与极限", "1.1 映射与函数", "5",
+         "函数是从一个数集到另一个数集的对应关系。设 x 与 y 是两个变量，若存在一个对应法则 f，使得对 x 的每一个值，y 都有唯一确定的值与之对应，则称 y 是 x 的函数，记作 y=f(x)。函数的定义域是自变量 x 的取值范围，值域是函数值的全体。求定义域时需注意：分母不能为零、偶次根号下非负、对数真数大于零等约束条件。"),
+        ("第1章 函数与极限", "1.4 无穷小与无穷大", "32",
+         "以零为极限的变量称为无穷小量。若两个无穷小之比 lim(α/β)=0，则称 α 是比 β 高阶的无穷小；若 lim(α/β)=1，则称 α 与 β 是等价无穷小，记作 α~β。在计算极限时，常用等价无穷小替换简化运算，例如当 x 趋于 0 时，sin x~x，tan x~x，1-cos x~(1/2)x²，ln(1+x)~x。使用等价无穷小替换时应注意：只能对乘除因子整体替换，不能对加减项随意替换。"),
+        ("第1章 函数与极限", "1.6 极限存在准则 两个重要极限", "47",
+         "两个重要极限是求极限的重要工具。第一个重要极限：lim(x→0) sin x / x = 1。其变形包括 lim(x→0) sin(ax)/(ax) = 1。第二个重要极限：lim(x→∞) (1 + 1/x)^x = e，等价形式 lim(t→0) (1+t)^(1/t) = e。利用第二个重要极限可求形如 lim(1 + 1/x)^(kx) = e^k 的极限。"),
+        ("第2章 导数与微分", "2.2 函数的求导法则", "78",
+         "求导的四则运算法则：(u ± v)' = u' ± v'；(uv)' = u'v + uv'（乘积法则）；(u/v)' = (u'v - uv')/v²（v 不为零）。复合函数求导使用链式法则：若 y = f(g(x))，则 y' = f'(g(x))·g'(x)。基本初等函数导数公式包括：C' = 0；(x^n)' = n·x^(n-1)；(sin x)' = cos x；(cos x)' = -sin x；(e^x)' = e^x；(ln x)' = 1/x。"),
+        ("第3章 中值定理与导数的应用", "3.2 洛必达法则", "120",
+         "洛必达法则是求未定式极限的有效方法。若 lim f(x) = lim g(x) = 0（或均为无穷大），且 f'(x) 与 g'(x) 存在、g'(x) 不为零，则 lim f(x)/g(x) = lim f'(x)/g'(x)。使用前提：分子分母同时趋于 0 或同时趋于无穷大（0/0 型或 ∞/∞ 型）；求导后的极限必须存在或为无穷大；一次使用不成功可多次使用，但每次使用前都要验证条件。"),
+        ("第4章 不定积分", "4.3 分部积分法", "165",
+         "分部积分法由乘积求导法则反推而来：∫u dv = uv - ∫v du。使用要点是恰当选择 u 与 dv：一般按'反对幂指三'的顺序优先选取 u（反三角函数、对数函数、幂函数、指数函数、三角函数），其余部分作为 dv。典型例子：∫x·e^x dx 中令 u = x，dv = e^x dx，则原式 = x·e^x - ∫e^x dx = e^x(x - 1) + C。"),
+        ("第5章 定积分", "5.2 微积分基本公式", "210",
+         "微积分基本定理（牛顿-莱布尼茨公式）把定积分与原函数联系起来：若 F(x) 是连续函数 f(x) 在 [a,b] 上的一个原函数，则 ∫(a→b) f(x) dx = F(b) - F(a)。变上限积分函数 Φ(x) = ∫(a→x) f(t) dt 满足 Φ'(x) = f(x)，是求变上限积分导数的基本工具。"),
     ],
     # 每题：(kp_name, type, content, options, answer, analysis, difficulty)
     "questions": [
@@ -627,6 +650,9 @@ def seed(database_url: str, reset: bool = False) -> None:
                 models.TokenUsage.__tablename__,
                 models.ChatSession.__tablename__,
                 models.AIExplanation.__tablename__,
+                models.TextbookUpload.__tablename__,
+                models.OcrUpload.__tablename__,
+                models.DiagnosisReport.__tablename__,
                 models.StudySession.__tablename__,
                 models.Plan.__tablename__,
                 models.UserKnowledgeState.__tablename__,
@@ -645,6 +671,7 @@ def seed(database_url: str, reset: bool = False) -> None:
 
         total_kp = 0
         total_q = 0
+        total_chunks = 0
         for subject_spec in SUBJECTS:
             subject = Subject(
                 code=subject_spec["code"],
@@ -707,8 +734,27 @@ def seed(database_url: str, reset: bool = False) -> None:
                 session.add(question)
                 total_q += 1
 
+            # M2：教材示例分块语料（source='textbook'，embedding 置空由后台 embedder 回填）
+            for c_order, (chapter, section, page, chunk_text) in enumerate(
+                subject_spec.get("doc_chunks", []), start=1
+            ):
+                session.add(
+                    DocumentChunk(
+                        subject_id=subject.id,
+                        source=subject_spec["doc_source"],
+                        chapter=chapter,
+                        section=section,
+                        page=page,
+                        chunk_text=chunk_text,
+                        embedding=None,
+                        meta={"seed": True, "chunk_index": c_order},
+                        content_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+                    )
+                )
+                total_chunks += 1
+
         session.commit()
-        print(f"[seed] 完成：2 科目 / {total_kp} 知识点 / {total_q} 题")
+        print(f"[seed] 完成：2 科目 / {total_kp} 知识点 / {total_q} 题 / {total_chunks} 教材分块")
         print(f"[seed] 科目：{', '.join(s['code'] + '(' + s['name'] + ')' for s in SUBJECTS)}")
 
 

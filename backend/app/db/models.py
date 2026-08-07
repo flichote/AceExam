@@ -1,6 +1,6 @@
-"""SQLAlchemy 2.x ORM models — AceExam M1 全部表（ep-db 交付，供 alembic env + seed 使用）。
+"""SQLAlchemy 2.x ORM models — AceExam M1 全部表 + M2 增量表（ep-db 交付，供 alembic env + seed 使用）。
 
-表结构事实来源：docs/database.md（ep-arch 评审后锁定）。
+表结构事实来源：docs/database.md（ep-arch 评审后锁定；M2 增量见 §8）。
 本模块与 backend/app/models/models.py（ep-backend 骨架）同用 app.db.base.Base；
 若两模块被同一进程同时 import 会出现表名重复注册，FastAPI 侧请以本模块为准或合并。
 """
@@ -199,6 +199,7 @@ class UserKnowledgeState(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="untouched")
     correct_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     wrong_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # M2：连续正确次数（答对+1，答错归 0；≥3 → mastered）
     last_practiced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
@@ -236,6 +237,7 @@ class StudySession(Base):
     questions_practiced: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     correct_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     checked_in: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # M2：打卡时间（api.md §8.3）
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
@@ -278,3 +280,87 @@ class TokenUsage(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_est: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class OcrUpload(Base):
+    """OCR 拍照录题上传记录（M2 新表，架构 §10.3 / §10.6-2）。
+
+    生命周期：pending（识别中）→ parsed（识别+结构化完成）/ failed（识别失败）
+              → confirmed（POST /questions/from-ocr 确认入库后，回填 question_id）。
+    """
+
+    __tablename__ = "ocr_uploads"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','parsed','failed','confirmed')", name="ck_ocr_status"
+        ),
+        Index("ix_ocr_user_status", "user_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subjects.id"), nullable=False)
+    image_path: Mapped[str] = mapped_column(String(500), nullable=False)  # 原始图片引用（对象存储 key / 本地路径）
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)  # Pix2Text 识别输出（Markdown 含 LaTeX）
+    structured: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # 结构化题目 JSON {type,content,options,answer,analysis,confidence}
+    suggested_kps: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # 知识点归属 top-3 [{id,name,score}]
+    knowledge_point_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("knowledge_points.id"), nullable=True)  # 用户确认的知识点
+    question_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("questions.id"), nullable=True)  # 确认入库后回填
+    error: Mapped[str | None] = mapped_column(String(200), nullable=True)  # 错误码（如 OCR_EMPTY）
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class DiagnosisReport(Base):
+    """薄弱诊断报告（M2 新表，架构 §10.4 / §10.6-3）。
+
+    两段式：规则层算排名（weak_top5/strengths/not_started），LLM 只生成措辞（report_text）。
+    questions 为自测题组快照（题目可后续被改/下线，快照保证报告可解释、与自测表现一致）。
+    """
+
+    __tablename__ = "diagnosis_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('in_progress','completed')", name="ck_diag_status"
+        ),
+        Index("ix_diag_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subjects.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="in_progress")
+    questions: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # 题组快照 [{id,knowledge_point_id,type,content,options,difficulty}]
+    answers: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # 作答快照 [{question_id,answer,correct}]
+    weak_top5: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # 薄弱 Top5 快照 [{rank,knowledge_point_id,accuracy,practice_count,status,suggestion}]
+    report_text: Mapped[str | None] = mapped_column(Text, nullable=True)  # LLM 措辞：summary + suggested_next_steps（JSON 字符串）
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class TextbookUpload(Base):
+    """教材/课件上传记录（M2 新表，架构 §10.2 ① / §10.6-4）。
+
+    用户上传教材 → 切块 → embedding 的状态跟踪；chunk_count 暴露处理进度
+    （前端可据 status 提示"教材处理中/已就绪"）。
+    """
+
+    __tablename__ = "textbook_uploads"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('processing','ready','failed')", name="ck_tb_status"
+        ),
+        Index("ix_tb_user_status", "user_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subjects.id"), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)  # 原始文件名
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)  # 存储引用
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="processing")
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)

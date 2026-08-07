@@ -1,8 +1,9 @@
-# AceExam 数据库设计（M1）
+# AceExam 数据库设计（M1 基线 + M2 增量）
 
-> **状态**：M1 基线 v1.0（2026-08-07）｜**作者**：ep-db
-> **定位**：表结构事实来源。需求见 [PRD](./PRD.md)；系统设计见 [architecture](./architecture.md)（subject 维度贯穿 / RAG 管线 / LLM 分级）；知识点状态机见 [flows](./design/flows.md)。
+> **状态**：M2 增量 v1.1（2026-08-07）｜**作者**：ep-db
+> **定位**：表结构事实来源。需求见 [PRD](./PRD.md)；系统设计见 [architecture](./architecture.md)（subject 维度贯穿 / RAG 管线 / LLM 分级 / M2 五件套）；知识点状态机见 [flows](./design/flows.md)。
 > **评审**：本文件与迁移脚本由 ep-arch 评审后锁定；任何表结构变更必须走 Alembic 迁移 + 同步更新本文档，禁止手改线上库。
+> **M2 增量说明**：M1 基线（§1~§7）保持不动；M2 表增量（`user_knowledge_states.streak` / `study_sessions.checked_in_at` / `ocr_uploads` / `diagnosis_reports` / `textbook_uploads` / `document_chunks.source` 取值扩展）见 §8，由迁移 `0002_m2_diagnosis_checkin_ocr` 落地。
 
 ---
 
@@ -45,6 +46,9 @@ users 1 ──── n chat_sessions / token_usage
 | `ai_explanations` | AI 讲解缓存（省钱，ADR-0002） | chat |
 | `chat_sessions` | AI 追问会话（保留最近 N 轮上下文） | chat |
 | `token_usage` | LLM token 计量（月度成本看板） | llm_gateway |
+| `ocr_uploads`（M2） | 拍照录题上传记录（pending→parsed/failed→confirmed） | ocr |
+| `diagnosis_reports`（M2） | 薄弱诊断报告（自测题组/作答/薄弱 Top5 快照） | diagnose |
+| `textbook_uploads`（M2） | 教材上传→切块→embed 状态跟踪 | rag / textbooks |
 
 ---
 
@@ -154,7 +158,7 @@ users 1 ──── n chat_sessions / token_usage
 |---|---|---|---|
 | id | UUID | PK, gen_random_uuid() | |
 | subject_id | UUID | NOT NULL, FK → subjects.id | 科目隔离 |
-| source | VARCHAR(200) | NOT NULL | 教材名（如《高等数学 同济第七版》） |
+| source | VARCHAR(200) | NOT NULL | 出处：内置教材名（如《高等数学 同济第七版》）；**用户上传教材统一用 `user_upload`**（M2 约定，VARCHAR 无 CHECK，天然支持） |
 | chapter | VARCHAR(100) | NULL | 章（元数据，展示用） |
 | section | VARCHAR(100) | NULL | 节 |
 | page | VARCHAR(20) | NULL | 页码（字符串，容忍"78-80"） |
@@ -201,6 +205,7 @@ users 1 ──── n chat_sessions / token_usage
 | status | VARCHAR(20) | NOT NULL, DEFAULT 'untouched', CHECK | 状态机，见 §3.4 |
 | correct_count | INT | NOT NULL, DEFAULT 0 | 累计正确次数 |
 | wrong_count | INT | NOT NULL, DEFAULT 0 | 累计错误次数 |
+| streak | INT | NOT NULL, DEFAULT 0 | **M2 新增**：连续正确次数（答对 +1、答错归 0；≥3 → mastered） |
 | last_practiced_at | TIMESTAMPTZ | NULL | 最近练习时间 |
 | updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
 
@@ -212,10 +217,10 @@ users 1 ──── n chat_sessions / token_usage
 > 状态机（flows.md 状态流转表）：
 > - `untouched` 未接触：初始；离开条件=首次做题
 > - `consolidating` 待巩固：正确率 40%~70%；离开=连续 3 次正确 → mastered
-> - `mastered` 已掌握：连续 3 次正确；离开=后续错误率回升 → consolidating/weak
+> - `mastered` 已掌握：连续 3 次正确（streak ≥ 3）；离开=后续错误率回升 → consolidating/weak
 > - `weak` 薄弱：正确率 < 40%；离开=连续 3 次正确 → mastered
 >
-> 正确率 = correct_count / (correct_count + wrong_count)。连续 3 次正确需要独立会话计数器（MVP 可用 correct_count 增量判断，严格版本后续加 streak 字段，走迁移）。
+> 正确率 = correct_count / (correct_count + wrong_count)。**streak（M2）** 由 `knowledge_state.apply_answer()` 统一维护：答对 +1、答错归 0；streak ≥ 3 且状态非 mastered → 置 mastered（架构 §10.1，T10 实现）。
 
 ### 2.9 plans —— 备考计划（简化 study_plans）
 
@@ -245,6 +250,7 @@ users 1 ──── n chat_sessions / token_usage
 | questions_practiced | INT | NOT NULL, DEFAULT 0 | 当日做题数 |
 | correct_count | INT | NOT NULL, DEFAULT 0 | 当日正确数 |
 | checked_in | BOOLEAN | NOT NULL, DEFAULT false | 是否打卡 |
+| checked_in_at | TIMESTAMPTZ | NULL | **M2 新增**：打卡时间（api.md §8.3 返回） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
 | updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
 
@@ -291,6 +297,66 @@ users 1 ──── n chat_sessions / token_usage
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
 
 索引：`ix_token_usage_created`：(created_at)（月度看板）
+
+### 2.14 ocr_uploads —— 拍照录题上传记录（M2 新增）
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| id | UUID | PK, gen_random_uuid() | |
+| user_id | UUID | NOT NULL, FK → users.id | |
+| subject_id | UUID | NOT NULL, FK → subjects.id | 目标科目 |
+| image_path | VARCHAR(500) | NOT NULL | 原始图片引用（对象存储 key / 本地路径） |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'pending', CHECK | `pending` 识别中 / `parsed` 识别+结构化完成 / `failed` 识别失败 / `confirmed` 确认入库 |
+| raw_text | TEXT | NULL | Pix2Text 识别输出（Markdown 含 LaTeX） |
+| structured | JSONB | NULL | 结构化题目 JSON `{type, content, options, answer, analysis, confidence}` |
+| suggested_kps | JSONB | NULL | 知识点归属 top-3 `[{id, name, score}]` |
+| knowledge_point_id | UUID | NULL, FK → knowledge_points.id | 用户确认的知识点 |
+| question_id | UUID | NULL, FK → questions.id | 确认入库（/questions/from-ocr）后回填 |
+| error | VARCHAR(200) | NULL | 错误码（如 OCR_EMPTY） |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+
+索引：`ix_ocr_user_status`：(user_id, status)（用户 OCR 记录列表/状态过滤）
+
+> 生命周期：`pending → parsed / failed → confirmed`；**独立表不直接复用 questions**——OCR 识别产物是"待确认草稿"，须经用户编辑确认后才入库 questions（source='ugc'），避免垃圾答案污染题库（架构 §10.3）。
+
+### 2.15 diagnosis_reports —— 薄弱诊断报告（M2 新增）
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| id | UUID | PK, gen_random_uuid() | |
+| user_id | UUID | NOT NULL, FK → users.id | |
+| subject_id | UUID | NOT NULL, FK → subjects.id | |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'in_progress', CHECK | `in_progress` / `completed` |
+| questions | JSONB | NOT NULL, DEFAULT '[]' | 自测题组快照 `[{id, knowledge_point_id, type, content, options, difficulty}]`（不含答案） |
+| answers | JSONB | NULL | 作答快照 `[{question_id, answer, correct}]` |
+| weak_top5 | JSONB | NULL | 薄弱 Top5 快照 `[{rank, knowledge_point_id, knowledge_point_name, accuracy, practice_count, status, suggestion}]`（规则层计算，架构 §10.4） |
+| report_text | TEXT | NULL | LLM 措辞（summary + suggested_next_steps，JSON 字符串） |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+
+索引：`ix_diag_user_created`：(user_id, created_at)（用户报告列表，最近优先）
+
+> 设计说明（架构 §10.4）：**排名由规则引擎计算、LLM 只生成建议**。`questions`/`answers`/`weak_top5` 均为快照，保证报告可解释且与自测表现一致（T12 QA 断言）。诊断所需的原始状态仍实时读 `user_knowledge_states`，本表只存自测批次与结果快照。
+
+### 2.16 textbook_uploads —— 教材上传记录（M2 新增）
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| id | UUID | PK, gen_random_uuid() | |
+| user_id | UUID | NOT NULL, FK → users.id | |
+| subject_id | UUID | NOT NULL, FK → subjects.id | |
+| filename | VARCHAR(255) | NOT NULL | 原始文件名 |
+| file_path | VARCHAR(500) | NOT NULL | 存储引用 |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'processing', CHECK | `processing` 切块/embed 中 / `ready` 已就绪 / `failed` 失败 |
+| chunk_count | INT | NOT NULL, DEFAULT 0 | 已生成分块数（进度展示） |
+| error | VARCHAR(500) | NULL | 失败原因 |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+
+索引：`ix_tb_user_status`：(user_id, status)
+
+> 数据流（架构 §10.2）：上传 → `textbook_uploads`（processing）→ 切块写 `document_chunks`（source='user_upload'）→ embedding 回填 → status='ready'；chunk_count 暴露处理进度。
 
 ---
 
@@ -357,6 +423,10 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 | questions.status | `draft` / `active` / `archived` | CHECK |
 | knowledge_points.level | 1 章 / 2 节 / 3 知识点 | `level BETWEEN 1 AND 3` |
 | plans.status | `active` / `completed` / `cancelled` | CHECK |
+| ocr_uploads.status（M2） | `pending` / `parsed` / `failed` / `confirmed` | `status IN ('pending','parsed','failed','confirmed')` |
+| diagnosis_reports.status（M2） | `in_progress` / `completed` | `status IN ('in_progress','completed')` |
+| textbook_uploads.status（M2） | `processing` / `ready` / `failed` | `status IN ('processing','ready','failed')` |
+| document_chunks.source（M2 取值扩展） | 内置教材名 / `user_upload` | VARCHAR 无 CHECK，天然支持 |
 
 ---
 
@@ -387,6 +457,9 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 | `ix_session_user_subject_date` | study_sessions | (user_id, subject_id, session_date) | 学习记录 |
 | `uq_expl_question_model_hash` | ai_explanations | (question_id, model, content_hash) | 缓存命中 |
 | `ix_token_usage_created` | token_usage | created_at | 成本看板 |
+| `ix_ocr_user_status`（M2） | ocr_uploads | (user_id, status) | OCR 记录列表 |
+| `ix_diag_user_created`（M2） | diagnosis_reports | (user_id, created_at) | 诊断报告列表 |
+| `ix_tb_user_status`（M2） | textbook_uploads | (user_id, status) | 教材上传列表 |
 
 > 向量 HNSW 参数：`m=16, ef_construction=64`（pgvector 默认推荐），数据量增长后可按需调整 `ef_search`（查询时指定）。
 
@@ -394,13 +467,14 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 
 ## 5. 迁移与种子
 
-- 迁移：Alembic（`backend/alembic/`），初始迁移 `versions/0001_initial.py` 建全部表 + 索引 + `CREATE EXTENSION IF NOT EXISTS vector`。
+- 迁移：Alembic（`backend/alembic/`），初始迁移 `versions/0001_initial.py` 建全部 M1 表 + 索引 + `CREATE EXTENSION IF NOT EXISTS vector`；M2 增量迁移 `versions/0002_m2_diagnosis_checkin_ocr.py`（streak / checked_in_at / ocr_uploads / diagnosis_reports / textbook_uploads）。
 - 配置：`DATABASE_URL` 环境变量（如 `postgresql+psycopg://aceexam:aceexam@localhost:5432/aceexam`），`.env` 不入库。
 - 种子：`backend/app/db/seed.py`（纯 SQLAlchemy 脚本，不依赖 FastAPI），幂等（已存在科目则跳过或 --reset 清空重建）。
-- 种子内容（M1）：
+- 种子内容：
   - 高数 + 英语两科 `subjects`（含 config）
   - 每科知识点图谱：≥ 3 章 × ≥ 5 知识点（章 → 知识点两级，节级留空待扩展）
   - 每科题库：≥ 30 题（含答案 + 解析，直接可刷）
+  - `document_chunks`（M2 补充）：高数教材示例分块语料 7 块（source='textbook'，embedding 置空由后台 embedder 回填），供 RAG 讲解/dev 检索使用
 
 ---
 
@@ -419,7 +493,31 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 
 ## 7. TBD / 开放项
 
-- [ ] 自适应选题加权公式（MVP 规则版）落地后，可能需要给 `user_knowledge_states` 加 `streak`（连续正确）字段 → 走迁移
+- [x] ~~自适应选题加权公式（MVP 规则版）落地后，可能需要给 `user_knowledge_states` 加 `streak`（连续正确）字段 → 走迁移~~ → **M2 已落地**（0002 迁移，架构 §10.1）
 - [ ] 会员订阅明细表（支付流水）M1 不做，用 `users.is_member` + `member_expires_at` 占位
 - [ ] 题目 UGC 审核流（status=draft → active）M1 只建字段，不建审核表
 - [ ] `document_chunks` 的 title 层级元数据（meta JSONB 已预留）
+
+---
+
+## 8. M2 表增量（T8 交付）
+
+> 落地迁移：`backend/alembic/versions/0002_m2_diagnosis_checkin_ocr.py`（down_revision=0001_initial）。
+> 事实来源：architecture.md §10.6；本小节与迁移脚本同步更新（评审后锁定）。
+
+### 8.1 变更清单
+
+| # | 对象 | 变更 | 说明 |
+|---|---|---|---|
+| 1 | `user_knowledge_states` | 增列 `streak INT NOT NULL DEFAULT 0` | 连续正确次数（答对+1、答错归 0；≥3 → mastered），状态机见 §2.8 |
+| 2 | `study_sessions` | 增列 `checked_in_at TIMESTAMPTZ NULL` | 打卡时间（api.md §8.3 返回），打卡幂等仍用乐观锁（UPDATE ... WHERE checked_in=false） |
+| 3 | `ocr_uploads` | 新表 | OCR 拍照录题上传记录，见 §2.14 |
+| 4 | `diagnosis_reports` | 新表 | 薄弱诊断报告，见 §2.15 |
+| 5 | `textbook_uploads` | 新表 | 教材上传状态跟踪，见 §2.16 |
+| 6 | `document_chunks.source` | 取值扩展 `user_upload` | M1 即为 VARCHAR(200) 无 CHECK，**无需 DDL**；仅约定取值（用户上传教材统一用 `user_upload`，与内置教材名区分） |
+
+### 8.2 评审结论（T8 决策）
+
+- **诊断**：`user_knowledge_states` 是"每用户每知识点"的实时状态（正确/错误计数 + streak），**不足以表达"某次自测批次的题组/作答/薄弱快照"**（自测后题目可能被改或下线、报告需与自测表现一致），故新增 `diagnosis_reports` 快照表，原始状态仍实时读 `user_knowledge_states`。
+- **打卡/计划**：`plans` + `study_sessions` 足以支撑"倒计时 + 每日任务 + 打卡"（每日任务由规则引擎实时推导，不落任务表，架构 §10.5）；仅补 `checked_in_at` 字段（API 返回需要）。
+- **OCR 录题**：独立 `ocr_uploads` 表，**不直接复用 questions**——OCR 产物是"待确认草稿"（可能识别错误、答案置信度低），须经前端编辑 + `/questions/from-ocr` 确认后才入库 questions（source='ugc'）并回填 `question_id`，避免垃圾答案污染题库。
