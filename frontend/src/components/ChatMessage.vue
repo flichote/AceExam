@@ -5,7 +5,31 @@
     </view>
 
     <view class="msg-main">
-      <view class="bubble" :class="isUser ? 'bubble--user' : 'bubble--assistant'">
+      <!-- AI 讲解：分步卡片 -->
+      <template v-if="!isUser && message.steps && message.steps.length">
+        <view class="steps-wrap">
+          <AiExplainCard
+            v-for="(step, i) in message.steps"
+            :key="i"
+            :step="step"
+            :index="i"
+            :expanded="expandedSteps[i] !== false"
+            :streaming="!!message.streaming"
+            @toggle="toggleStep(i)"
+          />
+        </view>
+        <!-- 结论 / 兜底文本 -->
+        <view v-if="message.content" class="bubble bubble--assistant">
+          <LatexText :text="message.content" :font-size="'15px'" :color="'#1F2937'" />
+        </view>
+        <!-- RAG 未覆盖提示 -->
+        <view v-if="!isUser && message.streaming === false && uncoveredOnly" class="uncovered">
+          <text class="uncovered-text">📖 教材库暂未覆盖该题，以下为通用讲解</text>
+        </view>
+      </template>
+
+      <!-- 普通气泡 -->
+      <view v-else class="bubble" :class="isUser ? 'bubble--user' : 'bubble--assistant'">
         <LatexText
           :text="message.content"
           :font-size="'15px'"
@@ -13,7 +37,7 @@
         />
 
         <!-- 流式输出中的打字指示 -->
-        <view v-if="message.streaming" class="typing">
+        <view v-if="message.streaming && !message.content" class="typing">
           <view class="typing-dot" />
           <view class="typing-dot" />
           <view class="typing-dot" />
@@ -33,14 +57,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import type { ChatMessage } from "@/types";
 import LatexText from "./LatexText.vue";
 import CitationBlock from "./CitationBlock.vue";
+import AiExplainCard from "./AiExplainCard.vue";
 
-const props = defineProps<{ message: ChatMessage }>();
+const props = defineProps<{ message: ChatMessage; uncovered?: boolean }>();
 
 const isUser = computed(() => props.message.role === "user");
+
+/** 折叠状态：默认全展开，点击收起（key 为步骤索引） */
+const expandedSteps = ref<Record<number, boolean>>({});
+function toggleStep(i: number) {
+  expandedSteps.value[i] = expandedSteps.value[i] !== false ? false : true;
+}
+
+const uncoveredOnly = computed(() => props.uncovered === true);
 </script>
 
 <style lang="scss">
@@ -71,9 +104,13 @@ const isUser = computed(() => props.message.role === "user");
 }
 
 .msg-main {
-  max-width: 76%;
+  max-width: 82%;
   display: flex;
   flex-direction: column;
+}
+
+.steps-wrap {
+  width: 100%;
 }
 
 .bubble {
@@ -95,6 +132,18 @@ const isUser = computed(() => props.message.role === "user");
   color: #ffffff;
   font-size: $font-body;
   line-height: 1.5;
+}
+
+/* RAG 未覆盖提示 */
+.uncovered {
+  margin-top: 8rpx;
+  background: rgba($warning-500, 0.1);
+  border-radius: $radius-tag;
+  padding: 8rpx 16rpx;
+}
+.uncovered-text {
+  font-size: 22rpx;
+  color: $warning-500;
 }
 
 /* 打字指示 */

@@ -18,7 +18,38 @@
       </view>
     </view>
 
-    <!-- 科目卡片列表 -->
+    <!-- 今日任务卡片（备考计划，docs/api.md §8） -->
+    <view class="plan-wrap">
+      <DailyPlanCard
+        :plan="planStore.plan"
+        :task="planStore.todayTask"
+        :checking-in="planStore.checkingIn"
+        @checkin="onCheckin"
+        @create="goCreatePlan"
+      />
+    </view>
+
+    <!-- 薄弱知识点速览 Top3 -->
+    <view v-if="weakKps.length" class="section">
+      <view class="section-head">
+        <text class="section-title">薄弱知识点</text>
+        <text class="section-sub" @click="goDiagnose">去诊断 →</text>
+      </view>
+      <view
+        v-for="kp in weakKps"
+        :key="kp.id"
+        class="card weak-card"
+        @click="goPracticeByKp(kp)"
+      >
+        <view class="weak-card-left">
+          <text class="weak-card-dot" />
+          <text class="weak-card-name">{{ kp.name }}</text>
+        </view>
+        <SubjectPill label="薄弱" type="danger" />
+      </view>
+    </view>
+
+    <!-- 科目卡片列表（考试科目 + 日期） -->
     <view class="section">
       <view class="section-head">
         <text class="section-title">我的科目</text>
@@ -78,8 +109,8 @@
 
         <view class="subject-foot">
           <text class="subject-foot-text">已掌握 {{ s.mastery.mastered }}/{{ s.mastery.total }} 题</text>
-          <view class="btn btn--primary subject-go">
-            <text class="btn--primary-text">去刷题 →</text>
+          <view class="btn btn--primary subject-go" @click.stop="goCreatePlan(s.id)">
+            <text class="btn--primary-text">设计划 →</text>
           </view>
         </view>
       </view>
@@ -111,12 +142,15 @@
 import { computed, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { useSubjectStore } from "@/stores/subject";
-import type { SubjectStatus } from "@/types";
+import { usePlanStore } from "@/stores/plan";
+import type { SubjectStatus, KnowledgePointHit } from "@/types";
 import LoadingSkeleton from "@/components/LoadingSkeleton.vue";
 import SubjectPill from "@/components/SubjectPill.vue";
 import ProgressRing from "@/components/ProgressRing.vue";
+import DailyPlanCard from "@/components/DailyPlanCard.vue";
 
 const subjectStore = useSubjectStore();
+const planStore = usePlanStore();
 
 const statusBarHeight = ref(20);
 
@@ -131,6 +165,7 @@ onLoad(() => {
 
 onShow(() => {
   subjectStore.loadSubjects();
+  planStore.loadActive();
 });
 
 /** 状态 → 徽章文案 / 类型（docs/design/design-system.md 状态映射） */
@@ -152,6 +187,12 @@ const maxStreak = computed(() =>
   subjectStore.subjects.reduce((max, s) => Math.max(max, s.streak), 0)
 );
 
+/** 薄弱知识点速览（Top3，来自计划快照 weak_kps） */
+const weakKps = computed<KnowledgePointHit[]>(() => {
+  const all = planStore.weakKps.filter((k) => (k.status || "").includes("weak"));
+  return all.slice(0, 3);
+});
+
 function taskPercent(task: { done: number; total: number }) {
   return task.total ? Math.round((task.done / task.total) * 100) : 0;
 }
@@ -164,12 +205,33 @@ const greeting = computed(() => {
   return "晚上好";
 });
 
+/** tab 间传递科目：selectSubject + switchTab（navigateTo 无法打开 tabBar 页） */
 function goPractice(subjectId: string) {
-  uni.navigateTo({ url: `/pages/practice/index?subjectId=${subjectId}` });
+  subjectStore.selectSubject(subjectId);
+  uni.switchTab({ url: "/pages/practice/index" });
+}
+
+function goPracticeByKp(kp: KnowledgePointHit) {
+  const sid = planStore.plan?.subject_id || subjectStore.subjects[0]?.id;
+  if (sid) subjectStore.selectSubject(sid);
+  uni.switchTab({ url: "/pages/practice/index" });
+}
+
+function goCreatePlan(subjectId?: string) {
+  const qs = subjectId ? `?subjectId=${subjectId}` : "";
+  uni.navigateTo({ url: `/pages/plan/create${qs}` });
 }
 
 function goChat() {
   uni.navigateTo({ url: "/pages/chat/index" });
+}
+
+function goDiagnose() {
+  uni.switchTab({ url: "/pages/diagnose/index" });
+}
+
+function onCheckin() {
+  planStore.checkin();
 }
 </script>
 
@@ -241,6 +303,13 @@ function goChat() {
   margin-top: 4rpx;
 }
 
+/* 今日任务卡（浮在 hero 下沿） */
+.plan-wrap {
+  margin-top: -20rpx;
+  position: relative;
+  z-index: 1;
+}
+
 /* 区块 */
 .section {
   padding: 32rpx;
@@ -258,7 +327,32 @@ function goChat() {
 }
 .section-sub {
   font-size: $font-aux;
-  color: $neutral-500;
+  color: $info-500;
+}
+
+/* 薄弱速览 */
+.weak-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 24rpx;
+  margin-bottom: 12rpx;
+}
+.weak-card-left {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+.weak-card-dot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  background: $danger-500;
+}
+.weak-card-name {
+  font-size: $font-body;
+  font-weight: 600;
+  color: $neutral-900;
 }
 
 /* 科目卡片 */

@@ -7,9 +7,9 @@
       </view>
       <view class="profile-info">
         <view class="profile-name-row">
-          <text class="profile-name">期末选手</text>
-          <view class="profile-badge">
-            <text class="profile-badge-text">免费版</text>
+          <text class="profile-name">{{ authStore.user?.username || "期末选手" }}</text>
+          <view class="profile-badge" @click="goLogin">
+            <text class="profile-badge-text">{{ authStore.isMember ? "会员版" : "免费版" }}</text>
           </view>
         </view>
         <text class="profile-sub">距考试最近：{{ nearestExam }}</text>
@@ -64,7 +64,7 @@
     </view>
 
     <view class="page-foot">
-      <text class="page-foot-text">AceExam v1.0.0 · M1 mock 先行</text>
+      <text class="page-foot-text">AceExam v1.0.0 · M2 五件套</text>
     </view>
   </view>
 </template>
@@ -73,14 +73,17 @@
 import { computed } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { useSubjectStore } from "@/stores/subject";
+import { useAuthStore } from "@/stores/auth";
 import { mockPracticeStat } from "@/mock/stats";
 
 const subjectStore = useSubjectStore();
+const authStore = useAuthStore();
 // TODO(ep-backend): GET /api/v1/me/stats 就绪后接入 store，当前 mock
 const stat = mockPracticeStat();
 
 onShow(() => {
   subjectStore.loadSubjects();
+  authStore.refreshUser();
 });
 
 const nearestExam = computed(() => {
@@ -103,8 +106,20 @@ const menus = [
 ];
 
 function onMenu(label: string) {
+  if (label === "备考计划") {
+    uni.navigateTo({ url: "/pages/plan/create" });
+    return;
+  }
+  if (label === "错题本") {
+    uni.switchTab({ url: "/pages/practice/index" });
+    return;
+  }
   // TODO: M3 实现对应页面
   uni.showToast({ title: `「${label}」将在 M3 提供`, icon: "none" });
+}
+
+function goLogin() {
+  uni.navigateTo({ url: "/pages/auth/login" });
 }
 </script>
 

@@ -5,27 +5,56 @@
       <LatexText :text="question.stem" :font-size="'17px'" />
     </view>
 
-    <!-- 选项 -->
-    <view
-      v-for="opt in question.options"
-      :key="opt.key"
-      class="option"
-      :class="optionClass(opt.key)"
-      @click="onSelect(opt.key)"
-    >
-      <view class="option-letter" :class="letterClass(opt.key)">
-        <text class="option-letter-text">{{ opt.key }}</text>
+    <!-- 选项题 -->
+    <template v-if="question.type === 'single' || question.type === 'multiple'">
+      <view
+        v-for="opt in question.options"
+        :key="opt.key"
+        class="option"
+        :class="optionClass(opt.key)"
+        @click="onSelect(opt.key)"
+      >
+        <view class="option-letter" :class="letterClass(opt.key)">
+          <text class="option-letter-text">{{ opt.key }}</text>
+        </view>
+        <view class="option-body">
+          <LatexText :text="opt.text" :font-size="'15px'" />
+        </view>
+        <text v-if="answered && isCorrectKey(opt.key)" class="option-mark">✓</text>
+        <text v-else-if="answered && isWrongKey(opt.key)" class="option-mark">✗</text>
       </view>
-      <view class="option-body">
-        <LatexText :text="opt.text" :font-size="'15px'" />
+      <view v-if="question.type === 'multiple'" class="qcard-hint">
+        <text class="qcard-hint-text">多选：可点选多个选项</text>
       </view>
-      <text v-if="answered && isCorrectKey(opt.key)" class="option-mark">✓</text>
-      <text v-else-if="answered && isWrongKey(opt.key)" class="option-mark">✗</text>
-    </view>
+    </template>
 
-    <view v-if="question.type === 'multiple'" class="qcard-hint">
-      <text class="qcard-hint-text">多选：可点选多个选项</text>
-    </view>
+    <!-- 填空题 -->
+    <template v-else-if="question.type === 'blank'">
+      <view class="qcard-answer">
+        <input
+          class="qcard-input"
+          :value="blankInput"
+          :disabled="answered"
+          placeholder="输入答案（支持公式，如 3 或 \frac{1}{3}）"
+          placeholder-class="qcard-placeholder"
+          @input="onBlankInput"
+        />
+      </view>
+    </template>
+
+    <!-- 简答题 -->
+    <template v-else-if="question.type === 'essay'">
+      <view class="qcard-answer">
+        <textarea
+          class="qcard-textarea"
+          :value="blankInput"
+          :disabled="answered"
+          placeholder="输入你的作答要点…"
+          placeholder-class="qcard-placeholder"
+          @input="onBlankInput"
+        />
+      </view>
+    </template>
   </view>
 </template>
 
@@ -42,19 +71,30 @@ const props = withDefaults(
     answered: boolean;
     /** 正确选项（提交后由反馈返回） */
     correctKeys?: string[];
+    /** 填空/简答输入值 */
+    blankInput?: string;
   }>(),
   {
     selected: () => [],
     answered: false,
     correctKeys: () => [],
+    blankInput: "",
   }
 );
 
-const emit = defineEmits<{ (e: "select", key: string): void }>();
+const emit = defineEmits<{
+  (e: "select", key: string): void;
+  (e: "update:blank", value: string): void;
+}>();
 
 function onSelect(key: string) {
   if (props.answered) return;
   emit("select", key);
+}
+
+function onBlankInput(e: any) {
+  // uni-app input/textarea 事件载荷：{ detail: { value } }
+  emit("update:blank", e?.detail?.value ?? "");
 }
 
 function isSelected(key: string) {
@@ -173,6 +213,28 @@ function letterClass(key: string): string {
 }
 .option--wrong .option-mark {
   color: $danger-500;
+}
+
+/* 填空 / 简答 */
+.qcard-answer {
+  margin-top: 8rpx;
+}
+.qcard-input,
+.qcard-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: $neutral-100;
+  border-radius: $radius-btn;
+  padding: 20rpx 24rpx;
+  font-size: $font-body;
+  color: $neutral-900;
+}
+.qcard-textarea {
+  min-height: 200rpx;
+  line-height: 1.6;
+}
+.qcard-placeholder {
+  color: $neutral-300;
 }
 
 @keyframes feedback-pop {

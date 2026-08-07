@@ -1,8 +1,8 @@
-import type { ChatMessage } from "@/types";
+import type { ChatExplainResult, ChatMessage, Citation, StepCard } from "@/types";
 
 /**
- * AI 对话 mock 流式回复
- * TODO(ep-ai): POST /api/v1/chat/stream（SSE）就绪后移除，见 api/chat.ts
+ * AI 对话 mock：自由问答流式 + 题目分步讲解（docs/api.md §5）
+ * TODO(ep-ai): POST /chat/explain + /chat/followup（SSE）就绪后移除，见 api/chat.ts
  */
 
 /** 关键词 → 回复模板 */
@@ -24,13 +24,68 @@ function pickReply(text: string): string {
 }
 
 /** 教材引用（mock RAG 溯源，ADR-0003） */
-const mockCitations = [
+const mockCitations: Citation[] = [
   {
     source: "同济《高等数学》第七版",
     chapter: "第一章 函数与极限 · 第六节 极限存在准则",
+    section: "1.6.2 夹逼准则",
+    page: "52",
     snippet: "准则Ⅰ（夹逼准则）：如果数列/函数满足 g(x) ≤ f(x) ≤ h(x) 且 lim g = lim h = A，则 lim f = A。",
+    score: 0.91,
   },
 ];
+
+/** 题目讲解分步（mock，模拟 SSE 的 step 事件序列） */
+export function mockExplain(): ChatExplainResult {
+  const steps: StepCard[] = [
+    {
+      title: "理解题意",
+      content: "题目要求计算 $\\lim\\limits_{x \\to 0} \\frac{\\sin x}{x}$。当 $x \\to 0$ 时分子分母均趋于 0，是 $\\frac{0}{0}$ 型未定式，不能直接代入。",
+    },
+    {
+      title: "方法一：夹逼定理",
+      content: "单位圆中 $\\sin x < x < \\tan x$（$0 < x < \\frac{\\pi}{2}$）。同除以 $\\sin x$ 得 $\\cos x < \\frac{x}{\\sin x} < 1$，取倒数：$1 < \\frac{\\sin x}{x} < \\frac{1}{\\cos x}$。由夹逼定理，$\\lim\\limits_{x \\to 0} \\frac{\\sin x}{x} = 1$。",
+    },
+    {
+      title: "方法二：洛必达法则",
+      content: "$\\frac{0}{0}$ 型可直接洛必达：分子分母分别求导 $\\lim\\limits_{x \\to 0} \\frac{\\cos x}{1} = \\cos 0 = 1$。",
+    },
+    {
+      title: "易错提醒",
+      content: "⚠️ 该极限是**第一个重要极限**，可直接作为结论使用；但不能把 $x \\to \\infty$ 下的 $\\frac{\\sin x}{x}$ 混为一谈（后者极限为 0）。",
+    },
+  ];
+  return {
+    session_id: `mock-session-${Date.now()}`,
+    steps,
+    conclusion: "综上，$\\lim\\limits_{x \\to 0} \\frac{\\sin x}{x} = 1$（第一个重要极限）。",
+    citations: mockCitations,
+    uncovered: false,
+    model: "pro",
+  };
+}
+
+/** 追问回复（mock，基于会话上下文关键词） */
+export function mockFollowup(message: string): ChatExplainResult {
+  const steps: StepCard[] = [
+    {
+      title: "针对追问",
+      content: `关于「${message}」，核心是回到定义：`,
+    },
+    {
+      title: "补充说明",
+      content: "夹逼定理要求两边极限存在且相等；洛必达要求分子分母可导且分母导数不为 0。两者都能得到同一结论，选择更熟练的方法即可。",
+    },
+  ];
+  return {
+    session_id: `mock-session-${Date.now()}`,
+    steps,
+    conclusion: "还有不清楚的地方可以继续追问，我会基于教材再展开。",
+    citations: mockCitations,
+    uncovered: false,
+    model: "pro",
+  };
+}
 
 /**
  * 模拟 SSE 流式输出：按块回调。

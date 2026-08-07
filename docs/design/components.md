@@ -14,15 +14,15 @@
 
 | 组件 | 职责 | 关键交互 |
 |---|---|---|
-| `QuestionCard` | 题目展示（题干/公式/选项） | KaTeX 渲染公式；选项点击选中 |
+| `QuestionCard` | 题目展示（题干/公式/选项/填空/简答） | KaTeX 渲染公式；选项点击选中；填空/简答输入 |
 | `AnswerFeedback` | 作答结果反馈（对/错 + 解析入口） | 200ms 缩放动效；"AI 讲解"按钮 |
-| `AiExplainCard` | AI 讲解 step-by-step 卡片 | 分步折叠；追问输入框 |
+| `AiExplainCard` | AI 讲解 step-by-step 卡片 | 分步折叠；流式打字指示 |
 | `CitationBlock` | 教材引用块（RAG 溯源） | 显示教材名+章节+原文片段 |
-| `PhotoCapture` | 拍照/相册 + 裁剪 | 调起相机；裁剪框 |
-| `OcrResultEditor` | OCR 识别结果确认/编辑 | Markdown/LaTeX 预览；可编辑 |
-| `DiagnoseReport` | 摸底诊断报告 | 薄弱 Top5 列表 + 建议 |
-| `KnowledgeMap` | 薄弱知识点图谱 | 节点点击 → 对应题/讲解 |
-| `DailyPlanCard` | 今日任务卡片 | 打卡按钮；完成态打勾 |
+| `PhotoCapture` | 拍照/相册（并入 pages/ocr/index，M3 再拆裁剪组件） | 调起相机 |
+| `OcrResultEditor` | OCR 识别结果确认/编辑 | Markdown/LaTeX 原文可编辑 + 结构化表单（题型/题干/选项/答案/解析） |
+| `DiagnoseReport` | 摸底诊断报告 | 薄弱 Top5 列表 + 建议 + 优势/未开始 + 下一步 |
+| `KnowledgeMap` | 薄弱知识点地图（P1 简化：列表） | 状态分组排序；点击 → 对应练习 |
+| `DailyPlanCard` | 今日任务卡片 | 倒计时 + 每日任务进度 + 打卡按钮（幂等）；无计划引导创建 |
 
 ## 通用组件
 
