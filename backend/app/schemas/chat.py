@@ -18,3 +18,4 @@ class ChatResponse(BaseModel):
     conclusion: str | None = None
     citations: list[dict] = []
     uncovered: bool = False
+    model: str = "flash"

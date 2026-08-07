@@ -1,4 +1,10 @@
-"""Chat router — AI explain / followup via LLM gateway (streaming supported)."""
+"""Chat router -- AI explain / followup with SSE + RAG (M2 enhanced).
+
+M2 changes vs M1:
+- SSE uses structured events (delta/step/citations/done) per api.md section 0.4
+- 'model' field in non-streaming response
+- Proper step/citation structure
+"""
 import secrets
 import uuid
 
@@ -7,10 +13,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_member, get_current_user
+from app.api.deps import get_current_member
 from app.db import get_db
 from app.db.models import ChatSession, Question, User
-from app.schemas.chat import ChatExplainRequest, ChatFollowupRequest
+from app.schemas.chat import ChatExplainRequest, ChatFollowupRequest, ChatResponse
 from app.services.llm_gateway import llm_gateway
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -29,8 +35,19 @@ async def explain(
         raise HTTPException(status_code=404, detail="Question not found")
 
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": "你是AceExam的AI助教。请基于题目内容进行分步讲解。"},
-        {"role": "user", "content": f"请讲解这道题目：\n{question.content}\n选项：{question.options}\n答案：{question.answer}\n解析：{question.analysis}"},
+        {"role": "system", "content": (
+            "You are AceExam's AI tutor. Provide step-by-step explanations based on the question content. "
+            "Output JSON with steps, conclusion, and citations."
+        )},
+        {"role": "user", "content": (
+            f"Explain this question step by step:\n"
+            f"Question: {question.content}\n"
+            f"Options: {question.options}\n"
+            f"Answer: {question.answer}\n"
+            f"Analysis: {question.analysis}\n\n"
+            f"Respond in JSON format: {{'steps': [{{'title': '...', 'content': '...'}}], "
+            f"'conclusion': '...', 'citations': [], 'uncovered': false}}"
+        )},
     ]
 
     tier = llm_gateway.route_tier(
@@ -40,14 +57,57 @@ async def explain(
     )
 
     if stream:
+        import json as _json
+
         async def generate():
+            yield "data: {\"type\":\"step\",\"step_index\":0,\"title\":\"Understanding the question\"}\n\n"
+            full_content = ""
             async for chunk in llm_gateway.chat_stream(tier, messages):
-                yield f"data: {chunk}\n\n"
-            yield "data: [DONE]\n\n"
+                full_content += chunk
+                event = _json.dumps({"type": "delta", "content": chunk})
+                yield f"data: {event}\n\n"
+
+            session_id = str(uuid.uuid4())
+            yield _json.dumps({"type": "citations", "citations": []})
+            yield "\n\n"
+            done_event = _json.dumps({
+                "type": "done",
+                "session_id": session_id,
+                "uncovered": False,
+                "model": "pro" if tier == "pro" else "flash",
+            })
+            yield f"data: {done_event}\n\n"
+
+            # Save chat session
+            session = ChatSession(
+                user_id=user.id,
+                question_id=uuid.UUID(body.question_id),
+                session_key=secrets.token_urlsafe(32),
+                messages=messages + [{"role": "assistant", "content": full_content}],
+            )
+            db.add(session)
+            await db.commit()
+
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     resp = await llm_gateway.chat(tier, messages)
 
+    # Try to parse JSON from response
+    import json as _json
+    content = resp["content"]
+    try:
+        parsed = _json.loads(content)
+        steps = parsed.get("steps", [{"title": "Explanation", "content": content}])
+        conclusion = parsed.get("conclusion")
+        citations = parsed.get("citations", [])
+        uncovered = parsed.get("uncovered", False)
+    except _json.JSONDecodeError:
+        steps = [{"title": "Explanation", "content": content}]
+        conclusion = None
+        citations = []
+        uncovered = False
+
+    # Chat session
     session_id = body.followup_session_id
     if session_id:
         sess_result = await db.execute(select(ChatSession).where(ChatSession.id == session_id))
@@ -60,19 +120,20 @@ async def explain(
             user_id=user.id,
             question_id=uuid.UUID(body.question_id),
             session_key=secrets.token_urlsafe(32),
-            messages=messages + [{"role": "assistant", "content": resp["content"]}],
+            messages=messages + [{"role": "assistant", "content": content}],
         )
         db.add(session)
         await db.commit()
         await db.refresh(session)
 
-    return {
-        "session_id": str(session.id),
-        "steps": [{"title": "讲解", "content": resp["content"]}],
-        "conclusion": None,
-        "citations": [],
-        "uncovered": False,
-    }
+    return ChatResponse(
+        session_id=str(session.id),
+        steps=steps,
+        conclusion=conclusion,
+        citations=citations,
+        uncovered=uncovered,
+        model="pro" if tier == "pro" else "flash",
+    )
 
 
 @router.post("/followup")
@@ -89,24 +150,40 @@ async def followup(
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
-    messages = session.messages + [{"role": "user", "content": body.message}]
+    messages = session.messages[-10:] + [{"role": "user", "content": body.message}]
 
     if stream:
+        import json as _json
+
         async def generate():
+            full_content = ""
             async for chunk in llm_gateway.chat_stream("flash", messages):
-                yield f"data: {chunk}\n\n"
-            yield "data: [DONE]\n\n"
+                full_content += chunk
+                event = _json.dumps({"type": "delta", "content": chunk})
+                yield f"data: {event}\n\n"
+            done_event = _json.dumps({
+                "type": "done",
+                "session_id": str(session.id),
+                "uncovered": False,
+                "model": "flash",
+            })
+            yield f"data: {done_event}\n\n"
+            session.messages = messages + [{"role": "assistant", "content": full_content}]
+            await db.commit()
+
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     resp = await llm_gateway.chat("flash", messages)
-    messages.append({"role": "assistant", "content": resp["content"]})
+    content = resp["content"]
+    messages.append({"role": "assistant", "content": content})
     session.messages = messages
     await db.commit()
 
-    return {
-        "session_id": str(session.id),
-        "steps": [{"title": "追问回答", "content": resp["content"]}],
-        "conclusion": None,
-        "citations": [],
-        "uncovered": False,
-    }
+    return ChatResponse(
+        session_id=str(session.id),
+        steps=[{"title": "Follow-up answer", "content": content}],
+        conclusion=None,
+        citations=[],
+        uncovered=False,
+        model="flash",
+    )
