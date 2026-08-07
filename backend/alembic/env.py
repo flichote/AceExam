@@ -32,10 +32,10 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """离线模式：只生成 SQL 不连库。"""
+    """离线模式：只生成 SQL 不连库（--sql）。"""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=url or "postgresql://",  # 仅用于渲染方言；--sql 模式不真正连接
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
