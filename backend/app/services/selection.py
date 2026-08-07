@@ -38,7 +38,11 @@ def recency_factor(kp: UserKnowledgeState) -> float:
     """Days since last practice, capped at 7 days. Never practiced = 7 days (max)."""
     if kp.last_practiced_at is None:
         return 1.0
-    days = (datetime.now(timezone.utc) - kp.last_practiced_at).days
+    last = kp.last_practiced_at
+    # SQLite 返回 naive datetime；PG(asyncpg) 返回 aware。统一为 aware 再比较。
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    days = (datetime.now(timezone.utc) - last).days
     return min(days, 7) / 7.0
 
 
