@@ -281,3 +281,134 @@ PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m2_*.py -q
 | 五件套主链路 | ❌ 阻断：D-8（判分恒错）、D-15（出题 500）、D-16（题目详情 500）三个 P1/P2 阻断智能刷题与拍照录题主链路 |
 
 **发布建议**：D-8/D-15/D-16 修复前不建议放开「智能刷题」「拍照录题确认后查看」；AI 讲解（含追问/SSE）、诊断报告（schema/幂等）、计划打卡（幂等/乐观锁）主链路可正常使用。缺陷用例已用 xfail 固化，ep-backend 修复后自动转 XPASS 验证。
+
+---
+
+# AceExam 测试报告（M3 图谱/突击/看板/排行/预警验收）
+
+> 文档归属：`docs/qa/`（ep-qa 测试工程师产出）
+> 关联任务：T18 M3 验收测试（kanban t_58ef44da）
+> 基线：`backend @ eaa4a30`、`frontend @ 9fa1690`（T15/T16/T17 交付后）
+> 执行环境：Windows / backend/.venv (Python 3.12.9) / node v22.23.1
+> 范围：知识图谱 / 考前突击 / 学习看板 / 排行榜 / 挂科预警 / 打卡连胜 六模块验收 + 全量回归
+
+---
+
+## 12. M3 测试范围与新增用例
+
+| 模块 | 验收点（flows.md / architecture.md §11） | 新增测试文件 | 用例数 |
+|---|---|---|---|
+| 知识图谱 | 树结构完整性（章→节→叶子）、节点状态映射、父节点 worst-child-wins 聚合、stats 叶子统计、question_count 聚合、include_questions | `tests/test_m3_knowledge_graph.py` | 11（1 xfail D-20） |
+| 考前突击 | 手动激活（计划 exam_date/days_left 快照）、幂等、自动激活（≤7 天）、题单生成（高频+错题、去重、限量、快照稳定、mock 模式、真题兜底） | `tests/test_m3_sprint.py` | 18（2 xfail D-21/D-22） |
+| 学习看板 | /me/dashboard 汇总（totals/mastery/streak/weak_points/per_subject/exam）、subject 过滤、/trend 按日/周/月分桶、空数据边界 | `tests/test_m3_dashboard.py` | 10 |
+| 排行榜 | 入围过滤（≥30 题且正确率≥0.1）、排序（correct DESC→accuracy DESC）、分页 rank 连续、me、scope=subject | `tests/test_m3_leaderboard.py` | 7 |
+| 挂科预警 | 风险等级三档边界（≤7/8-14/>14 天）、趋势调整（不活跃+1、向好-1）、理由可解释、overall 取最高、多计划/无计划边界 | `tests/test_m3_warnings.py` | 11 |
+| 打卡连胜 | compute_streak 纯函数：连续/中断判定、longest 保留、乱序防御 | `tests/test_m3_streak.py` | 10 |
+| 合计 | | | **67（3 xfail）** |
+
+实现说明：
+- 上游 DeepSeek 不真调：M3 七个端点在 API 层均为规则实现（LLM 增强函数由 T17 单独测试 `test_ai_m3.py` 覆盖，mock llm_gateway），本批 API 测试无需 mock 上游。
+- 技术选型沿用 M1/M2：pytest + pytest-asyncio（asyncio_mode=auto）+ httpx ASGITransport + 直接入库种子（与 `test_m2_*` 一致）。
+- 发现的 3 个新缺陷（D-20/D-21/D-22）按约定用非严格 xfail 固化契约，修复后自动转 XPASS 验证。
+
+## 13. 执行结果（M3 实测）
+
+### 13.1 M3 专项套件
+
+```
+64 passed, 3 xfailed in 71.33s
+```
+
+### 13.2 后端 pytest 全量回归
+
+```
+383 passed, 1 failed, 5 xfailed, 8 xpassed in 259.74s
+```
+
+- T18 开工前基线：`319 passed, 1 failed, 2 xfailed, 8 xpassed`（330 项）
+- M3 新增：**64 通过 + 3 xfail**（合计 67 项，全量 397 项）
+- 唯一失败：`tests/test_config.py::test_default_database_url` —— **预存环境性失败**（本地开发配置 `DATABASE_URL=sqlite+aiosqlite:///./aceexam.db`，测试断言默认应为 asyncpg PG 串），与 T17 交接记录一致，非本次引入。
+- **8 个 XPASS = M2 缺陷契约自动验证通过**：D-8（判分信封）、D-9（状态滞后）、D-11（weak_top5 排序）、D-15×4（自适应出题 500）、D-16（题目详情 options 500）—— 全部由 T15/T17 修复，旧 xfail 用例转 XPASS 确认，M2 三个 P1 阻断全部解除。
+- 5 个 xfail 剩余：D-10（dict options 自测 500）、D-17（本地日 vs UTC 日）、D-20/D-21/D-22（本批新增，见 §15）。
+
+> ⚠️ 测试基建偶发（非业务缺陷）：第一次全量回归出现 `test_api_questions.py` 2 失败 + 1 错误（`sqlite3.OperationalError: no such table`），单测隔离均通过；重跑全量未复现（383 passed）。根因是 conftest `reset_db` 逐用例 drop_all/create_all 与 aiosqlite 连接池快照的竞态，属测试基建 flake，与 M3 业务代码无关。
+
+### 13.3 前端烟测
+
+```
+cd frontend && npm run build
+→ DONE  Build complete.   (dist/build/h5 2.2M；仅 Dart Sass legacy-js-api 弃用警告)
+```
+
+### 13.4 运行方式（复现）
+
+```bash
+cd backend
+PYTHONPATH= .venv/Scripts/python.exe -m pytest -q                 # 全量
+PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m3_*.py -q   # M3 专项
+```
+
+## 14. M3 验收点清单（对照 flows.md / architecture.md §11）
+
+| 验收点 | 状态 | 说明 |
+|---|---|---|
+| 图谱：三级树结构完整（章→节→知识点） | ✅ 通过 | root=章，children=节，叶子 level=3；节点 id/name/level/question_count 正确 |
+| 图谱：节点状态正确映射 | ✅ 通过 | weak/mastered/consolidating/untouched 四态落到叶子；practice_count/accuracy 正确 |
+| 图谱：父节点自底向上聚合 | ✅ 通过 | worst-child-wins：任一 weak→weak；全 mastered→mastered；根随最差子节点 |
+| 图谱：stats 只统计叶子 | ✅ 通过 | total_nodes/leaf_count/mastered/weak/consolidating/untouched 计数正确 |
+| 图谱：多章（多 root）科目 | ❌ 阻断（D-20） | len(roots)>1 时 root=None，整棵树对前端不可见（xfail 固化） |
+| 突击：手动激活（会员） | ✅ 通过 | 200 + created=True；计划 exam_date/days_left 快照正确；无计划 days_left=null |
+| 突击：激活幂等 | ✅ 通过 | 重复激活 created=False，DB 仅 1 条 active 记录 |
+| 突击：自动激活（考前 ≤7 天） | ✅ 通过 | GET questions 自动激活 auto_activated=True；考试 >7 天 → 403 不激活 |
+| 突击：题单=高频考点+错题交集 | ✅ 通过 | heat≥20 且 avg_acc<0.75 的考点题 tag=high_freq；未掌握错题 tag=wrong_review |
+| 突击：去重 | ✅ 通过（行为） | 同题既是高频题又是错题 → 只出现一次；但 summary.deduped 恒 0（D-21） |
+| 突击：限量 | ⚠️ 部分（D-22） | 错题阶段严格限量；高频阶段单考点可超出 count（count=2 返 3 题） |
+| 突击：快照稳定 | ✅ 通过 | 重复请求返回同一题单快照；DB question_snapshot 落库 |
+| 突击：真题兜底 / mock 模式 | ✅ 通过 | 无高频状态时 past_exam 考点兜底；mode=mock 返回 duration/score |
+| 看板：汇总正确性 | ✅ 通过 | totals 求和、mastery_pct=叶子掌握率、streak 当前/最长、weak_points、exam 倒计时 |
+| 看板：per_subject 分解 + subject 过滤 | ✅ 通过 | 多科目分解正确；subject_id 过滤只统计该科目 |
+| 看板：trend 时间序列 | ✅ 通过 | 按日/周/月分桶；命中桶数据正确；空桶 accuracy=None |
+| 看板：trend 空数据边界 | ✅ 通过 | 无 session → 全 0 / accuracy=None / mastery_pct=0，不炸 |
+| 排行：入围过滤 | ✅ 通过 | <30 题剔除；正确率 <0.1 剔除 |
+| 排行：排序 | ✅ 通过 | total_correct DESC → accuracy DESC 两级排序；同正确数正确率高者优先 |
+| 排行：分页 | ✅ 通过 | page/page_size、rank 连续、total 正确、越界空页 |
+| 排行：me / scope=subject | ✅ 通过 | me 排名正确；无数据 me=null；subject 范围只聚合该科目 |
+| 预警：风险等级边界 | ✅ 通过 | ≤7 天（0.4/0.7 分界）、8-14 天（0.3/0.6）、>14 天（0.2/0.5）三档正确 |
+| 预警：趋势调整 | ✅ 通过 | 近 7 天活跃 ≤4 天 +1 级；≥70 题且正确率 ≥0.8 -1 级 |
+| 预警：理由可解释 | ✅ 通过 | reasons 含正确率/练习次数/倒计时/活跃天数人类可读文案；suggestion 非空 |
+| 预警：overall 取最高 + 边界 | ✅ 通过 | 多计划 max；无计划/无日期/过期考试/无薄弱各边界正确 |
+| 打卡连胜：连续/中断判定 | ✅ 通过 | 今天/昨天打卡→存活；<昨天→current=0；longest 保留历史最长段 |
+
+## 15. M3 缺陷记录（新增）
+
+> 按工作约定只记录不修改业务代码；以下缺陷需 ep-backend 修复。
+
+### D-20 [P2] 多章科目知识图谱 root 丢失
+- **现象**：科目含 ≥2 个一级章时 `GET /subjects/{id}/knowledge-graph` 返回 `root: null`，整棵树（全部章/节/知识点）对前端不可见；仅 stats 仍正确。
+- **根因**：`build_knowledge_graph` 中 `root = roots[0] if len(roots) == 1 else None`，多 root 场景直接丢弃所有节点。
+- **影响**：真实科目（通常多章）图谱页面空白，ECharts series-tree 无根可渲染。
+- **用例**：`test_m3_knowledge_graph.py::TestMultiRoot::test_multi_root_keeps_all_roots`（xfail）。
+
+### D-21 [P3] 突击题单 summary.deduped 恒为 0
+- **现象**：同一题既是高频考点题又是错题时，题单正确去重（只出现一次），但 `summary.deduped` 恒为 0。
+- **根因**：实现为 `high_freq_questions + wrong_review_questions - total`，而两个计数与 `items.append` 严格同步，恒等于 total，从未统计被去重跳过的错题数。
+- **影响**：前端「去重 N 题」提示恒为 0，与实际去重行为不符（轻微展示问题）。
+- **用例**：`test_m3_sprint.py::test_summary_deduped_metric_counts_skipped_wrong`（xfail）。
+
+### D-22 [P2] 突击题单 count 限量不严格（高频阶段可超出）
+- **现象**：`GET /sprint/questions?count=2` 在高频考点各有 3 题时返回 3 题；count 仅是软上限。
+- **根因**：高频阶段 SQL `LIMIT 3` 每次取满 3 题，`break` 判断在考点循环顶部而非逐题判断，单考点即可超出 `hf_slots`。
+- **影响**：用户请求题数可能被超出（最多 +2/考点）；错题阶段严格限量不受影响。
+- **用例**：`test_m3_sprint.py::test_count_limit`（xfail）。
+
+## 16. 三里程碑质量门禁汇总
+
+| 门禁 | M1（T6） | M2（T12） | M3（T18） |
+|---|---|---|---|
+| pytest 单元/集成 | ✅ 178 passed | ⚠️ 274 passed / 10 xfailed / 2 failed（D-12 预存） | ✅ **383 passed / 5 xfailed / 8 xpassed**（1 failed 为 test_config 预存环境性） |
+| 前端构建烟测 | ✅ npm run build | ✅ npm run build:h5 | ✅ npm run build（DONE） |
+| 三层质量门禁（pytest / OCR / RAG） | pytest ✅；OCR 待 M2；RAG mock 层 ✅ | 五件套 49 用例 + OCR mock 流程 ✅（真实 Pix2Text 样本集仍缺模型） | pytest ✅（M3 67 用例）；OCR/RAG 回归随全量通过（M2 已覆盖） |
+| M2 P1/P2 阻断缺陷 | — | ❌ D-8/D-15/D-16 阻断 | ✅ 全部修复并 XPASS 验证 |
+| M3 新阻断 | — | — | ⚠️ D-20（图谱多章 root 丢失）建议修复后放开图谱页面；D-21/D-22 为 P2/P3 可排期 |
+
+**发布建议**：M2 三个 P1/P2 阻断（判分/出题/题目详情）已由 T15 修复并自动验证；M3 主链路（看板/排行/预警/突击/打卡连胜）验收通过。建议优先修复 D-20（多章科目图谱空白，影响真实使用），D-21/D-22 可随下个里程碑排期。缺陷用例均已 xfail 固化，修复后自动转 XPASS。
