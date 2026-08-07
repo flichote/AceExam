@@ -148,7 +148,7 @@ class TTSService:
         cache_dir: Path | None = None,
         default_voice: str = DEFAULT_VOICE,
     ) -> None:
-        self._cache_dir = cache_dir or CACHE_DIR
+        self._cache_dir = Path(cache_dir or CACHE_DIR)
         self._default_voice = default_voice
 
     # ── public API ────────────────────────────────────────────────────────
