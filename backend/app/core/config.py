@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     LLM_PRO_MAX_TOKENS: int = 2048
     LLM_REQUEST_TIMEOUT: int = 30
 
+    # ── Embedding ──
+    # NOTE: DeepSeek may not provide a dedicated embeddings API.
+    # When this is empty or returns 404, the embedder falls back to keyword-based
+    # retrieval (bag-of-words + TF-IDF scoring against chunk text / title).
+    EMBEDDING_ENABLED: bool = True
+    EMBEDDING_MODEL: str = ""  # e.g. "text-embedding-3-small" if using OpenAI-compatible API
+    EMBEDDING_BASE_URL: str = ""  # separate base URL for embeddings (OpenAI / local)
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_DIM: int = 1024  # must match pgvector VECTOR(N) column
+
     # ── App ──
     APP_NAME: str = "AceExam"
     DEBUG: bool = False
