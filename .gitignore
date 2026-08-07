@@ -1,0 +1,45 @@
+# --- Secrets ---
+.env
+.env.*
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / Frontend ---
+node_modules/
+.next/
+dist/
+build/
+out/
+unpackage/
+.hbuilderx/
+
+# --- Database ---
+*.db
+*.sqlite3
+pgdata*/
+data/postgres/
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Logs & Cache ---
+*.log
+logs/
+tmp/
+.cache/
+coverage/
+htmlcov/
