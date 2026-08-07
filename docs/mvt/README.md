@@ -34,5 +34,9 @@
 
 | 文件 | 内容 |
 |---|---|
-| `survey.md` | 问卷模板（可直接粘贴到问卷星） |
-| `demo-prompts.md` | 高数 demo 提示词包（直接复制到 DeepSeek 用） |
+| `survey.md` | 问卷模板（含判定标准，可对照） |
+| `survey_wjx.txt` | **问卷星一键导入文本**（复制粘贴即建卷） |
+| `promo-copy.md` | 发布文案包（朋友圈/校园墙/班级群 3 版 + 红包策略） |
+| `interview-log.md` | 访谈记录表（3 核心问题 + 汇总判定表） |
+| `demo-prompts.md` | 高数 demo 提示词（复制到 DeepSeek 用） |
+| `demo-samples.md` | 真实 API 输出样例（可截图发人） |
