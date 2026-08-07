@@ -1,10 +1,11 @@
 # AceExam 架构设计（M1 基线）
 
-> **状态**：M3 增量 v1.2（2026-08-08）｜**作者**：ep-arch
+> **状态**：M3.5 增量 v1.3（2026-08-08）｜**作者**：ep-arch
 > **定位**：本文件是系统设计的事实来源。需求唯一事实来源是 [PRD](./PRD.md)；视觉/交互见 [design/](./design/)；表结构与 API 契约分别以 [database](./database.md) 与 [api](./api.md) 为准（评审后锁定，变更走文档）。
 > **配套决策**：关键技术决策固化在 [docs/adr/](../adr/)（ADR-0001 ~ 0003）。
 > **M2 增量说明**：M1 基线（§1~§9）保持不动；MVP 五件套（智能刷题/AI 讲解/拍照录题/薄弱诊断/备考计划）的模块设计在 §10 增量追加，API 契约详版见 [docs/api.md](./api.md)。
 > **M3 增量说明**：§10 五件套保持不动；体验增强与增长功能（知识点图谱可视化 / 考前突击模式 / 打卡连胜 / 学习数据看板 / 排行榜 / 挂科预警）的模块设计在 §11 增量追加；API 契约增量见 [docs/api.md](./api.md) §11；表结构增量由 T14 落地 [docs/database.md](./database.md) §9；任务图见 [docs/ops/M3-taskgraph.md](./ops/M3-taskgraph.md)。
+> **M3.5 增量说明**：§11 保持不动；M3 剩余功能（语音讲解 TTS / UGC 题库共建 / 成绩单海报分享 / 班级排行榜）的模块设计在 §12 增量追加；API 契约增量见 [docs/api.md](./api.md) §12；表结构增量由 T20 落地 [docs/database.md](./database.md) §10；任务图见 [docs/ops/M3.5-taskgraph.md](./ops/M3.5-taskgraph.md)。
 
 ---
 
@@ -14,12 +15,13 @@
 |---|---|---|
 | `docs/PRD.md` | 需求唯一事实来源（功能分层/核心闭环/题库策略） | v0.1 已定 |
 | `docs/design/*` | 页面地图 / 设计系统 / 组件 / 交互流程 | 已定 |
-| **`docs/architecture.md`（本文）** | 系统模块划分、科目模板、RAG 管线、LLM 分级、API 骨架、ADR 索引、M2 五件套 + M3 图谱/突击/看板/排行/预警模块设计 | **M3 增量 v1.2** |
-| `docs/database.md` | 表结构（M1 基线；M2 §8 / M3 §9 增量） | M1 锁定，M2 §8 已交付，M3 §9 由 T14 |
-| `docs/api.md` | API 契约详版（Pydantic 级字段定义 + 各里程碑差异表） | **M3 v1.0（35 端点）** |
+| **`docs/architecture.md`（本文）** | 系统模块划分、科目模板、RAG 管线、LLM 分级、API 骨架、ADR 索引、M2 五件套 + M3 图谱/突击/看板/排行/预警 + M3.5 TTS/UGC/海报/班级模块设计 | **M3.5 增量 v1.3** |
+| `docs/database.md` | 表结构（M1 基线；M2 §8 / M3 §9 / M3.5 §10 增量） | M1 锁定，M2 §8 已交付，M3 §9 已交付，M3.5 §10 由 T20 |
+| `docs/api.md` | API 契约详版（Pydantic 级字段定义 + 各里程碑差异表） | **M3.5 v1.1（43 端点）** |
 | `docs/ops/M1-taskgraph.md` | M1 里程碑任务图与启动手册 | 已存在，T1 完善 |
 | `docs/ops/M2-taskgraph.md` | M2 里程碑任务图（T7~T12） | T7 产出 |
 | `docs/ops/M3-taskgraph.md` | M3 里程碑任务图（T13~T18） | T13 产出 |
+| `docs/ops/M3.5-taskgraph.md` | M3.5 里程碑任务图（T19~T23） | T19 产出 |
 
 **规则**：接口契约（API 字段、表结构）由 ep-arch 评审后锁定；任何变更必须同步修改本文档 + 对应交付文档，禁止只改代码。
 
@@ -744,7 +746,7 @@ longest_streak（历史最佳）：S 按日期排序，相邻日期间隔 == 1 �
 - **主排序 = 累计正确题数**（total_correct，全科目或按科过滤）；**次排序 = 正确率**（accuracy，仅当样本量 ≥ 30 题才参与排序，<30 视为 0）；展示列：名次 / 用户 / 做题量 / 正确率 / 连续天数（连胜仅展示，不参与排序）。
 - 理由：纯做题量 → 鼓励刷水题刷量，噪音大；纯正确率 → 1 题 100% 就霸榜，无意义；纯连续天数 → 只奖励打卡不奖励产出。累计正确题数 = "有效产出"，最接近产品目标（通过考试靠做对题），且天然防"刷量不改对"；同分用正确率打破平局（≥30 题门槛保证样本可信）。
 - 防作弊/防噪音：**做题量 < 30 题的用户不进榜**（新用户保护）；正确率 < 0.1 视为异常（疑似乱答），标 `suspicious` 不参与排序。
-- **维度**：`scope=global`（全部用户）｜`scope=subject`（按科目过滤，`subject_id` 必填）。**班级维度 M3 不做**：当前数据模型无班级/成员关系表（users 无 class_id），班级榜需要 classes/memberships 建模 + 邀请/审核流，划入 V2（PRD 第三层"班级排行榜"）。M3 的 global 榜已覆盖"同学间比一比"的主要场景。
+- **维度**：`scope=global`（全部用户）｜`scope=subject`（按科目过滤，`subject_id` 必填）。**班级维度 M3 不做，M3.5 实现**：§11.9 D3 原判"班级维度 V2"被 §12.4 修订——M3.5 采用 classes 表 + 邀请码模型落地 `scope=class`（详见 §12.4 / 决策 D10）。
 - **实现方案（T14 决策输入）**：**纯查询方案，不建聚合表/物化视图**。MVP 用户量小，实时聚合（study_sessions 按用户 GROUP BY + §11.3 连胜）毫秒级；缓存收益低。预留：用户量 > 1k 或查询 > 100ms 时加 `leaderboard_snapshots`（每日快照：user_id / subject_id / total_correct / accuracy / streak，定时任务刷新，接口只读快照）——M3 不建，见 §11.7 预留项。
 - **API**：见 api.md §11.6；分页沿用统一格式。
 
@@ -831,9 +833,186 @@ longest_streak（历史最佳）：S 按日期排序，相邻日期间隔 == 1 �
 |---|---|---|
 | D1 | 图谱可视化选型 | ECharts `series-tree` + uni-echarts（renderjs：H5/App；canvas：mp-weixin），兜底自绘 canvas |
 | D2 | 排行榜口径 | 主=累计正确题数，次=正确率（≥30 题门槛），连胜仅展示；做题量 < 30 不进榜 |
-| D3 | 排行榜维度 | global + subject；班级维度 V2（需 classes/memberships 建模） |
+| D3 | 排行榜维度 | global + subject（M3）；**班级维度 M3.5 实现**（classes 表 + 邀请码 + users.class_id，见 §12.4 / D10） |
 | D4 | 统计类是否落表 | 连胜 / 排行榜 / 预警 / 高频考点全部实时推导不落表；唯一新表 `sprint_sessions`（题单快照） |
 | D5 | 突击会员边界 | 突击为会员功能（免费 403）；自动激活对免费用户仅展示引导 |
 | D6 | 挂科预警判定 | 规则层 base(weak_count × days_left) + 趋势修正 ±1，clamp 低~高；LLM 只生成理由措辞 |
 | D7 | 连胜判定 | 最近打卡日 = today 或 yesterday 则未断；间隔 ≥ 2 天即断；时区 Asia/Shanghai 日界 |
 | D8 | 掌握度曲线口径 | as-of 近似：mastered 状态 `updated_at ≤ 桶末` 计数 |
+
+---
+
+## 12. M3.5 增量：TTS 语音讲解 / UGC 题库共建 / 成绩单海报分享 / 班级排行榜
+
+> 本节是 M3.5 的模块级设计，在 M1~M3 基线上增量追加（§1~§11 不重写）。**接口契约（字段级）以 [docs/api.md](./api.md) §12 为准；表结构变更以 [docs/database.md](./database.md)（T20 增量 §10）为准；任务图见 [docs/ops/M3.5-taskgraph.md](./ops/M3.5-taskgraph.md)。**
+> 对应 PRD §3：语音讲解（TTS，第二层）+ 班级排行榜 / 成绩单海报分享 / UGC 题库共建（第三层）。挂科预警已随 M3 交付，M3.5 补齐 M3 剩余功能。
+
+**M3.5 设计总原则**：
+
+1. **延续 M3 的"实时推导不落快照"**：分享卡 / 班级榜全部实时聚合，无新统计表；唯一新表 `classes`（成员关系必须持久化）。
+2. **AI 边界延续**：TTS 用 edge-tts 合成（非 LLM，零 token 成本）；UGC 自动解析复用 M2 OCR 管线（Pix2Text + LLM 结构化，§10.3），不新增 AI 服务。
+3. **可信度优先**：UGC 进公共题库必须过审核门控（防题库污染）；班级榜必须基于真实成员关系（邀请码），否决自由填班名（防串班/刷榜）。
+4. **会员边界**：TTS 跟随 AI 讲解为会员功能（免费 403）；UGC 投稿、班级、海报分享登录即可用（增长钩子，与 §11 M3 原则一致）。
+
+### 12.1 语音讲解（TTS）
+
+**选型评估（context7 验证 2026-08-08，查询记录见卡片 comment）**：
+
+| 方案 | 优点 | 缺点 | 结论 |
+|---|---|---|---|
+| **后端 edge-tts**（`/rany2/edge-tts`，High 信誉，425 snippets） | 免费零 token；跨端一致（小程序/App/H5 全支持）；音色可控（zh-CN 音色白名单）；可缓存/保存；异步流式 `Communicate.stream()` 产出 mp3 chunk | 微软非官方端点（ToS 灰度、可能限流）；依赖外网（需代理配置） | **定案（D9）** |
+| 前端 Web Speech API | 零后端成本；浏览器原生 | 微信小程序无 `speechSynthesis`；音色随 OS 漂移；无法缓存/保存；不可控 | 否决 |
+
+**方案定案（D9）**：后端 edge-tts 生成 mp3（24kHz / 48kbps CBR mono，edge-tts 默认输出），FastAPI `FileResponse` 音频流；前端 `uni.createInnerAudioContext()` 播放。
+
+**管线**：
+
+```
+POST /chat/explain/{session_id}/tts
+  1. 取 chat_sessions 最近一条 assistant 消息 content（讲解全文；无则 404 EXPLANATION_NOT_FOUND）
+  2. 文本清洗：拼接 steps 标题+内容+conclusion 为纯文本；去 LaTeX 标记（公式 MVP 边界：省略或中文口语近似）
+  3. key = sha256(text + voice)；磁盘缓存 backend/media/tts/{key}.mp3 命中 → 直接返回（cache_hit=true）
+  4. 未命中 → edge_tts.Communicate(text, voice, rate) → stream() 逐块写文件 → 返回
+  5. 失败（无网络/微软限流）→ 502 TTS_UNAVAILABLE（前端提示稍后重试）
+GET /tts/audio/{file_hash}.mp3
+  FileResponse（media_type audio/mpeg, Content-Disposition inline；Starlette 自动支持 Range，可拖动进度）
+```
+
+- **voice 白名单**：`zh-CN-XiaoxiaoNeural`（晓晓，默认）/ `zh-CN-YunxiNeural`（云希，男声）；MVP 前端不提供切换（固定默认），接口预留参数。
+- **代理**：edge-tts 访问微软端点，生产环境经 `HTTPS_PROXY` 环境变量注入（`Communicate(proxy=...)` 支持）；国内部署必需。
+- **缓存清理**：定时任务按 mtime 清理 30 天前的 mp3（ops 手册）；MVP 不建表，文件名即 key 自描述（决策 D14）。
+- **会员边界**：与 AI 讲解一致（api.md §5.1，免费 403 PAYMENT_REQUIRED）——TTS 是讲解的语音化，跟随讲解付费。
+- **代码文件**：`backend/app/services/tts_service.py`（T21，edge-tts 封装 + 文本清洗 + 缓存读写）；路由 `backend/app/api/v1/chat.py` 增量（T20）。
+- **API**：见 api.md §12.1/§12.2。
+
+### 12.2 UGC 题库共建
+
+**与现有 /questions/from-ocr 的关系（D13）**：
+
+| 通道 | 目的 | 入库门控 | questions.status |
+|---|---|---|---|
+| `POST /questions/from-ocr`（M2 已有） | 个人录题（错题/拍照，自己的学习闭环） | 直接 active | `active` |
+| `POST /questions/ugc`（M3.5 新增） | 投稿共建公共题库 | **审核门控** | `pending` → `active` / `rejected` |
+
+两者共用同一解析管线（Pix2Text OCR + LLM 结构化 + 知识点建议，§10.3）与同一来源标记（`source='ugc'`）；差异只在**审核门控**。前端在 OCR 预览页提供"投稿共建"入口——用户确认结构化结果后调 `/questions/ugc` 而非 `from-ocr`。
+
+**审核状态机（D11）**：
+
+```
+[提交] POST /questions/ugc
+  规则预检（必做）：
+    - content ≥ 15 字；type 合法；answer 结构与题型匹配（选择→options 的 key；填空/大题→文本）
+    - 重复检测：content_hash 命中题库已有题 → 409 DUPLICATE（返回既有 question_id）
+    - 通过 → 插入 questions(source='ugc', status='pending', submitted_by=当前用户)
+[审核] POST /admin/questions/{id}/review（users.role='admin'）
+    action=approve → status='active'（进公共题池，可被选题/搜索命中），reviewed_by/reviewed_at 落库
+    action=reject   → status='rejected'（reject_reason 必填 ≥5 字，前端对提交者展示理由）
+  已审核题目重复审核 → 409 ALREADY_REVIEWED
+[规则自动审核]（可选，默认关）
+    subjects.config.ugc_auto_approve=true 时：提交者累计被 approve ≥5 题且通过率 ≥90% → 自动置 active（可信贡献者）
+```
+
+- **表结构（§12.5）**：`questions.status` CHECK 扩展 `pending` / `rejected`；新增 `submitted_by` / `reviewed_by` / `reviewed_at` / `reject_reason` 列；`ix_questions_status_created (status, created_at)` 索引（审核列表查询）。
+- **管理端形态**：MVP 提供 H5 管理页（T22，admin 角色登录可见）或直接调 API；不建独立管理后台。
+- **API**：见 api.md §12.3~§12.5；**代码文件**：`backend/app/services/ugc_service.py`（T21，预检规则 + 自动审核），路由 `backend/app/api/v1/questions.py` 增量 + `backend/app/api/v1/admin.py`（T20）。
+
+### 12.3 成绩单海报分享
+
+**方案定案（D12）**：**前端 canvas 生成海报图，后端只做数据聚合**（`GET /me/share-card` 一次性返回全部指标）。理由：海报样式迭代快、视觉强绑定设计系统（amber 主色），前端 canvas 灵活；后端渲染需 headless/图片合成栈，重且没必要。
+
+**数据聚合（GET /me/share-card）**：
+
+| 区块 | 字段 | 来源 |
+|---|---|---|
+| 用户 | username | users |
+| 学习总量 | questions_practiced / correct_count / accuracy | study_sessions 实时聚合 |
+| 连胜 | current / longest | §11.3 streak 纯函数 |
+| 掌握度 | overall_mastery_pct + best_subject {name, mastery_pct} | user_knowledge_states 实时聚合 |
+| 薄弱点 | weak_count（weak+consolidating 叶子数） | user_knowledge_states |
+| 近 7 天 | questions_practiced_7d / accuracy_7d | study_sessions 近 7 天 |
+| 班级（可选） | class_name | users.class_id → classes |
+| 考试（可选） | exam_subject / days_left | active 计划 |
+| 元信息 | generated_at / share_card_version | — |
+
+**前端生成与保存（context7 验证 uni-app 2026-08）**：
+
+- 绘制：uni-app canvas —— 小程序/App 用 `<canvas type="2d">`（新版 canvas 2d 接口），H5 用 HTML canvas；同一 draw 函数按平台条件编译（T22）。
+- 导出：`uni.canvasToTempFilePath`（H5 返回 base64；小程序返回临时文件路径）。
+- 保存/分享：
+  - 小程序：`uni.saveImageToPhotosAlbum({filePath})`（filePath 必须本地临时/永久路径，不支持网络路径；需授权 `scope.writePhotosAlbum`）+ `onShareAppMessage` 转发带图。
+  - H5：canvas `toDataURL('image/png')` → `<a download>` 下载 / 新页展示长按保存。
+  - App：`uni.saveImageToPhotosAlbum`（App 3.0.5+）。
+- 视觉：海报模板固定尺寸（750×1334 逻辑像素），主色 amber `--primary-500`，语义色复用 design-system token；`share_card_version` 用于海报模板迭代缓存失效。
+- **API**：见 api.md §12.8；**无新表**（实时聚合）。
+
+### 12.4 班级排行榜
+
+**班级来源定案（D10，修订 §11.5 D3）**：采用 **classes 表 + 6 位邀请码 + users.class_id 单班制（可空）**。
+
+对比评估：
+
+| 方案 | 优点 | 缺点 | 结论 |
+|---|---|---|---|
+| 自由填 class_name（T20 草案） | 零建模 | 无法验证成员关系；撞名即串班；榜单一被污染产品信任崩 | **否决** |
+| **classes 表 + 邀请码** | 成员关系真实；防串班；榜单只对班内成员可见；建班一次永久归属 | 多一张表 + 建班流程（一次性成本） | **定案** |
+| 教学班多对多（class_members 中间表） | 支持多班（高数教学班+英语教学班） | 中间表 + 加入/退出复杂度 | V2 |
+
+- **流程**：班长 `POST /me/class {name}` 建班（生成 6 位 `invite_code`）→ 分享码 → 同学 `POST /me/class {invite_code}` 加入 → `users.class_id` 落库 → `GET /leaderboard?scope=class` 按 class_id 过滤。
+- **隐私**：`class_id` 默认 NULL（未加入不进班榜）；退出 = 清空 class_id（V2 提供 DELETE /me/class，MVP 用"换班覆盖"）。
+- **权限**：仅班内成员可见本班榜单（接口校验请求者 class_id 与榜单 class_id 一致）；admin 可见全部。
+- **口径**：沿用 §11.5 D2（主=累计正确题数、次=正确率 ≥30 题门槛、<30 题不进榜）；`scope=class` 可叠加 `subject_id` 过滤。
+- **表结构（§12.5）**：`classes` 新表 + `users.class_id` 列 + 索引。
+- **API**：见 api.md §12.6/§12.7；**代码文件**：路由 `backend/app/api/v1/me.py` 增量 + `leaderboard.py` 增量（T20）；无 AI 服务。
+
+### 12.5 M3.5 表结构增量（与 ep-db 的约定，T20 落地）
+
+> 架构层面锁定以下表/字段需求；DDL 与迁移由 T20 落地（`backend/alembic/versions/0004_m35_*.py`）并同步更新 `docs/database.md` §10（评审后锁定，禁止手改）。
+
+1. **`classes`（新表，M3.5 唯一新表）**：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | UUID PK | |
+| name | VARCHAR(100) NOT NULL | 班级名（如"计科 2301"） |
+| invite_code | VARCHAR(6) NOT NULL UNIQUE | 6 位邀请码（字母+数字，建班时生成，可重发） |
+| created_by | UUID FK → users.id | 建班人（班长） |
+| created_at / updated_at | TIMESTAMPTZ | |
+
+索引：`uq_classes_invite_code`（UNIQUE invite_code）。成员数实时推导（COUNT users.class_id），不落列。
+
+2. **`users.class_id`（新列）**：`UUID NULL FK → classes.id`（单班制，可空）；索引 `ix_users_class_id (class_id)`。
+
+3. **`questions` 扩展（UGC 审核）**：
+
+- `status` CHECK 扩展：`draft / pending / active / rejected / archived`
+- 新列：`submitted_by UUID NULL FK → users.id`（投稿人）、`reviewed_by UUID NULL FK → users.id`（审核人）、`reviewed_at TIMESTAMPTZ NULL`、`reject_reason TEXT NULL`
+- 新索引：`ix_questions_status_created (status, created_at)`（审核列表）
+
+> 状态机语义：`pending` = 待审核（不进公共题池）；`active` = 已通过（= approved，进公共题池）；`rejected` = 已拒绝（保留原题，前端对提交者展示理由）；`draft` / `archived` 沿用管理端语义。公共题池查询保持 `WHERE status='active'` 不变。
+
+4. **TTS**：**无新表**（磁盘缓存 key=sha256(text+voice)，§12.1；mtime 定时清理）。
+5. **分享卡**：**无新表**（实时聚合，§12.3）。
+
+### 12.6 M3.5 新增/调整的代码文件总览（角色边界）
+
+| 文件 | 归属 | 说明 |
+|---|---|---|
+| `backend/app/services/tts_service.py` | T21 | edge-tts 封装 + 文本清洗 + 磁盘缓存（§12.1） |
+| `backend/app/services/ugc_service.py` | T21 | UGC 预检规则 + 可选自动审核（§12.2） |
+| `backend/app/api/v1/chat.py`、`questions.py`、`admin.py`、`me.py`、`leaderboard.py` | T20 | M3.5 端点增量（api.md §12）；admin 角色依赖 `users.role='admin'` |
+| `backend/alembic/versions/0004_m35_*.py`、`backend/app/models/`、`docs/database.md` §10 | T20 | classes 新表 + users.class_id + questions 扩展（§12.5） |
+| `frontend/` | T22 | 语音播放（createInnerAudioContext）、UGC 投稿入口、班级榜切换 + 加入页、海报 canvas（type=2d / H5 canvas） |
+| `backend/tests/`、`docs/qa/` | T23 | M3.5 验收测试（TTS mock / UGC 状态机 / 班级边界 / 分享卡聚合） |
+
+> 冲突规避：`tts_service.py` / `ugc_service.py` 归 T21；T20 路由只 import 调用，若 T21 未交付先返回 501 或 mock 兜底（接口先行，沿用 §10.1 约定），T21 落地后替换并删除内联实现（卡片 comment 注明）。
+
+### 12.7 M3.5 决策锁定表
+
+| # | 决策 | 定案 |
+|---|---|---|
+| D9 | TTS 方案 | 后端 edge-tts 生成 mp3（zh-CN 音色白名单）+ FileResponse 音频流；否决前端 Web Speech API（小程序无、音色不可控）；磁盘缓存 key=sha256(text+voice) |
+| D10 | 班级模型（修订 D3） | classes 表 + 6 位邀请码 + users.class_id 单班制；否决自由填 class_name（成员关系不可验证）；教学班多班 V2 |
+| D11 | UGC 审核状态机 | questions.status 扩展 pending/rejected（approved=active）；提交预检必做；自动审核默认关；重复审核 409 |
+| D12 | 海报生成 | 前端 canvas 生成（type=2d / H5 canvas），后端只聚合（GET /me/share-card）；小程序 saveImageToPhotosAlbum / H5 toDataURL 下载 |
+| D13 | UGC 与 from-ocr 关系 | 共用 OCR 管线与 source='ugc'；from-ocr=个人录题直接 active，/questions/ugc=投稿进审核流 |
+| D14 | TTS 缓存存储 | 磁盘文件缓存（sha256 文件名），不建表（无 LLM 成本，mtime 清理） |

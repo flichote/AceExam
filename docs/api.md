@@ -1,9 +1,9 @@
 # AceExam API 契约（M3）
 
-> **状态**：M3 v1.0（2026-08-08）｜**作者**：ep-arch
-> **定位**：前后端对接的唯一依据（Pydantic schema 级字段定义）。模块设计见 [architecture](./architecture.md)（§10 M2 五件套、§11 M3 图谱/突击/看板/排行/预警）；表结构见 [database](./database.md)；需求见 [PRD](./PRD.md)。
+> **状态**：M3.5 v1.1（2026-08-08）｜**作者**：ep-arch
+> **定位**：前后端对接的唯一依据（Pydantic schema 级字段定义）。模块设计见 [architecture](./architecture.md)（§10 M2 五件套、§11 M3 图谱/突击/看板/排行/预警、§12 M3.5 TTS/UGC/海报/班级）；表结构见 [database](./database.md)；需求见 [PRD](./PRD.md)。
 > **评审**：接口契约由 ep-arch 评审后锁定；任何变更必须同步修改本文档 + 相关代码，禁止只改代码。
-> **覆盖范围**：M1 已交付端点（§1~§4 简述）+ M2 五件套端点（§5~§8 详述）+ 与 M1 差异总表（§9）+ M2 实现备注（§10）+ M3 新增端点（§11）。
+> **覆盖范围**：M1 已交付端点（§1~§4 简述）+ M2 五件套端点（§5~§8 详述）+ 与 M1 差异总表（§9）+ M2 实现备注（§10）+ M3 新增端点（§11）+ M3.5 新增端点（§12）。
 
 ---
 
@@ -36,7 +36,7 @@
 ### 0.3 分页 / 幂等 / 时区
 
 - 分页响应统一：`{"items": [...], "total": int, "page": int, "page_size": int}`
-- 写操作支持 `Idempotency-Key` 头：`POST /questions/{id}/answers`、`POST /questions/from-ocr`、`POST /diagnose/report`、`POST /plans`、`POST /plans/{id}/checkin`、`POST /ocr/upload`。服务端对同 key 重放返回首次结果（不重复写）。
+- 写操作支持 `Idempotency-Key` 头：`POST /questions/{id}/answers`、`POST /questions/from-ocr`、`POST /diagnose/report`、`POST /plans`、`POST /plans/{id}/checkin`、`POST /ocr/upload`、`POST /questions/ugc`、`POST /me/class`、`POST /admin/questions/{id}/review`（M3.5 新增）。服务端对同 key 重放返回首次结果（不重复写）。
 - 时间字段统一 ISO8601 UTC（`2026-08-07T12:00:00Z`）；日期字段 `YYYY-MM-DD`。
 - 所有带 subject 语义的列表接口必须支持/必填 `subject_id`（ADR-0001 防串科）。
 
@@ -734,6 +734,7 @@ Query：
 | page / page_size | int | 否 | 1 / 20 | 分页（page_size ≤ 50） |
 
 鉴权：登录。
+> **M3.5 修订**：`scope` 枚举新增 `class`（班级维度，按请求者 `users.class_id` 过滤），契约见 §12.7；未加入班级返回 422 `CLASS_NOT_JOINED`。
 响应 200：
 
 ```json
@@ -786,7 +787,7 @@ Query：`subject_id: string?`（缺省 = 全部有 active 计划的科目）
 
 `GET /subjects/{subject_id}/knowledge-graph`、`POST /subjects/{subject_id}/sprint/activate`、`GET /subjects/{subject_id}/sprint/questions`、`GET /me/dashboard`、`GET /me/dashboard/trend`、`GET /leaderboard`、`GET /me/warnings`
 
-> 合计：**35 端点**（M2 28 + M3 新增 7）。§9 差异表为 M2 快照，M3 增量以本节为准。
+> 合计：**35 端点**（M2 28 + M3 新增 7）。§9 差异表为 M2 快照，M3 增量以本节为准；M3.5 增量见 §12（新增 8 端点 + 修订 1，总计 43）。
 
 ### 11.9 实现备注（各角色）
 
@@ -796,3 +797,255 @@ Query：`subject_id: string?`（缺省 = 全部有 active 计划的科目）
 - **T16（ep-frontend）**：按本契约对接；图谱用 uni-echarts（H5/App renderjs，mp-weixin canvas 降级），节点点击 → 题单；趋势折线图用 ECharts line（uni-echarts 同组件）；`accuracy: null` 桶前端补零。
 - **T18（ep-qa）**：按 §11.6 风险等级边界、§11.3 连胜连续/中断、§11.2 高频+错题交集去重、§11.5 排序口径写断言（见 docs/ops/M3-taskgraph.md 验收清单）。
 - 变更流程：改端点/字段必须先改本文档 + architecture.md §11 对应小节，再改代码；评审由 ep-arch。
+
+## 12. M3.5 增量：TTS / UGC / 班级 / 海报 API
+
+> 本节是 M3.5 新增端点契约，在 M3（§1~§11）之上增量追加，不重写既有章节。模块设计见 architecture.md §12；表结构增量见 database.md §10（T20）。TTS 端点为会员功能（跟随 AI 讲解，免费 403 PAYMENT_REQUIRED）；UGC 投稿 / 班级 / 海报分享登录即可。
+
+### 12.1 POST /chat/explain/{session_id}/tts（新增，生成讲解语音）
+
+请求体（可选）：
+
+```json
+{"voice": "zh-CN-XiaoxiaoNeural"}
+```
+
+鉴权：会员（免费 403 PAYMENT_REQUIRED）。
+行为：
+
+1. 校验会话归属（chat_sessions.id + user_id）→ 404 不存在或非本人
+2. 取最近一条 assistant 消息 content（讲解全文）→ 无 assistant 消息 → 404 `EXPLANATION_NOT_FOUND`
+3. 文本清洗 + key=sha256(text+voice) → 磁盘缓存命中 → `cache_hit=true`
+4. 未命中 → edge-tts 生成 mp3 → 落盘 → `cache_hit=false`
+5. 失败（无网络/服务不可用）→ 502 `TTS_UNAVAILABLE`（前端提示稍后重试）
+
+响应 200：
+
+```json
+{
+  "session_id": "uuid",
+  "audio_url": "/api/v1/tts/audio/3f9c8e2a....mp3",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "text_preview": "第一步，我们先理解题意：题干给出极限式……",
+  "cache_hit": false,
+  "created_at": "2026-08-08T12:00:00Z"
+}
+```
+
+- `voice` 白名单：`zh-CN-XiaoxiaoNeural`（默认）/ `zh-CN-YunxiNeural`；非法 → 422。
+- 同文本同 voice 幂等（缓存天然幂等，无需 Idempotency-Key）。
+- 错误：403 PAYMENT_REQUIRED、404、422（voice 非法）、502（TTS 服务不可用）。
+
+### 12.2 GET /tts/audio/{file_hash}.mp3（新增，音频流）
+
+鉴权：登录。
+响应 200：`audio/mpeg` 音频流（FileResponse，Content-Disposition inline，Starlette 自动支持 Range 拖动播放）。
+错误：404（缓存文件不存在 → 前端提示重新生成，调 §12.1）。
+
+### 12.3 POST /questions/ugc（新增，提交待审题）
+
+请求体：
+
+```json
+{
+  "subject_id": "uuid",
+  "knowledge_point_id": "uuid",
+  "type": "single",
+  "content": "题干（≥15 字）",
+  "options": [{"key": "A", "text": "选项A"}],
+  "answer": "C",
+  "analysis": "解析（可选）",
+  "ocr_upload_id": "uuid|null"
+}
+```
+
+鉴权：登录。支持 `Idempotency-Key`。
+规则预检（architecture.md §12.2）：content ≥ 15 字；answer 与 type 匹配；options 数量与 type 匹配；content_hash 重复检测（命中题库已有题 → 409 `DUPLICATE` + detail 既有 question_id）。
+响应 201：
+
+```json
+{"question_id": "uuid", "status": "pending", "duplicated": false}
+```
+
+- 幂等 key 重放：返回首次结果（`duplicated: true`，同 §3.4 from-ocr 语义）；内容重复（不同提交者同题）→ 409 `DUPLICATE`。
+- 副作用：questions 插入（source='ugc'、status='pending'、submitted_by=当前用户）→ `question_embeddings` 异步生成（仅 approved 后需要，MVP 可延后到审核通过时生成）。
+- 错误：404（subject/kp/ocr_upload 不存在）、409 DUPLICATE、422（预检失败，detail 含字段错误）。
+
+### 12.4 GET /admin/questions/ugc（新增，审核列表）
+
+Query：
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| status | string | 否 | pending | `pending` / `active` / `rejected` |
+| page / page_size | int | 否 | 1 / 20 | 分页（page_size ≤ 50） |
+
+鉴权：admin（users.role='admin'，非 admin → 403 FORBIDDEN）。
+响应 200（统一分页格式）：
+
+```json
+{
+  "items": [
+    {
+      "question_id": "uuid", "subject_id": "uuid", "subject_name": "高等数学",
+      "knowledge_point_id": "uuid", "knowledge_point_name": "洛必达法则",
+      "type": "single", "content": "…", "options": [{"key": "A", "text": "…"}],
+      "answer": "C", "analysis": "…",
+      "submitted_by": {"user_id": "uuid", "username": "zhangsan"},
+      "status": "pending", "created_at": "2026-08-08T12:00:00Z",
+      "reject_reason": null
+    }
+  ],
+  "page": 1, "page_size": 20, "total": 3
+}
+```
+
+- 列表按 created_at 升序（最旧待审先处理）；admin 可看全部状态，非 admin 一律 403。
+
+### 12.5 POST /admin/questions/{id}/review（新增，审核通过/拒绝）
+
+请求体：
+
+```json
+{"action": "approve", "reject_reason": null}
+```
+
+或
+
+```json
+{"action": "reject", "reject_reason": "答案有误，请核对后重新提交"}
+```
+
+鉴权：admin（非 admin → 403 FORBIDDEN）。支持 `Idempotency-Key`。
+行为：题目必须 source='ugc' 且 status='pending'；否则 409 `ALREADY_REVIEWED`（已审核）或 422（非 UGC 题）。
+
+- approve → status='active'，reviewed_by/reviewed_at 落库（进公共题池，可被选题命中）。
+- reject → status='rejected'，reject_reason 必填（≥5 字）。
+
+响应 200：
+
+```json
+{"question_id": "uuid", "status": "active", "reviewed_at": "2026-08-08T12:00:00Z"}
+```
+
+错误：403 FORBIDDEN、404（题目不存在）、409 ALREADY_REVIEWED、422（action 非法 / reject 缺理由 / 非 UGC 题）。
+
+### 12.6 POST /me/class（新增，建班/加入班级）
+
+请求体（二选一）：
+
+```json
+{"name": "计科2301"}
+```
+
+或
+
+```json
+{"invite_code": "A1B2C3"}
+```
+
+鉴权：登录。支持 `Idempotency-Key`。
+行为：
+
+- 建班（有 name）：classes 插入（name + 6 位 invite_code 唯一生成）→ users.class_id 指向新班 → 成为班长（is_creator=true）。
+- 加入（有 invite_code）：invite_code 查 classes → users.class_id 指向（覆盖旧班；已在同班幂等返回既有）。
+- name 与 invite_code 都传或都不传 → 422。
+
+响应 200：
+
+```json
+{
+  "class": {"id": "uuid", "name": "计科2301", "invite_code": "A1B2C3",
+            "member_count": 12, "is_creator": true},
+  "joined": true
+}
+```
+
+- `member_count` 实时 COUNT（users.class_id）；`invite_code` 仅建班人返回（加入者返回 null）。
+- 错误：404（邀请码不存在）、422（参数缺失/非法）。
+
+### 12.7 GET /me/class（新增，我的班级）+ GET /leaderboard?scope=class（修订 §11.6）
+
+GET /me/class 响应 200：
+
+```json
+{
+  "class": {"id": "uuid", "name": "计科2301", "invite_code": "A1B2C3",
+            "member_count": 12, "is_creator": false},
+  "my_rank": {"rank": 3, "total_correct": 180}
+}
+```
+
+- 未加入班级：`{"class": null, "my_rank": null}`。
+- `my_rank`：班榜中我的名次（口径同 §11.6；不在榜 rank=null）。
+
+GET /leaderboard?scope=class（§11.6 修订，M3.5 新增 scope 枚举值）：
+
+- `scope` 枚举：`global` / `subject` / `class`（class 为 M3.5 新增，§11.6 已加修订指针）。
+- `scope=class`：按请求者 users.class_id 过滤（未加入班级 → 422 `CLASS_NOT_JOINED`，前端引导加入）；`subject_id` 可选（缺省 = 全科目，叠加科目过滤）。
+- 响应在 §11.6 基础上增加 class 元信息：
+
+```json
+{
+  "scope": "class",
+  "class": {"id": "uuid", "name": "计科2301", "member_count": 12},
+  "items": [
+    {"rank": 1, "user_id": "uuid", "username": "lisi",
+     "total_correct": 860, "questions_practiced": 1150, "accuracy": 0.748,
+     "current_streak": 8}
+  ],
+  "page": 1, "page_size": 20, "total": 12,
+  "me": {"rank": 3, "total_correct": 180, "questions_practiced": 260, "accuracy": 0.692}
+}
+```
+
+- 口径沿用 §11.6（主=total_correct 降序、次=accuracy 降序 ≥30 题门槛、<30 题不进榜；`accuracy < 0.1` 标 suspicious 不参与排序）。
+- 错误：422 CLASS_NOT_JOINED、422（scope=subject 缺 subject_id）。
+
+### 12.8 GET /me/share-card（新增，分享卡数据聚合）
+
+Query：无（MVP 缺省全部科目）。
+鉴权：登录。
+响应 200：
+
+```json
+{
+  "username": "zhangsan",
+  "generated_at": "2026-08-08T12:00:00Z",
+  "share_card_version": 1,
+  "totals": {"questions_practiced": 1280, "correct_count": 940, "accuracy": 0.734},
+  "recent_7d": {"questions_practiced": 86, "correct_count": 61, "accuracy": 0.709},
+  "streak": {"current": 5, "longest": 12},
+  "mastery": {
+    "overall_pct": 0.321,
+    "best_subject": {"subject_id": "uuid", "subject_name": "高等数学", "mastery_pct": 0.42}
+  },
+  "weak_points": {"weak": 6, "consolidating": 4},
+  "class": {"id": "uuid", "name": "计科2301"},
+  "exam": {"subject_name": "高等数学", "days_left": 7}
+}
+```
+
+- 口径与 §11.4 dashboard 一致（实时聚合，architecture.md §12.3）；`recent_7d` 近 7 天（含今天）做题统计。
+- `class` / `exam` 无数据时返回 null（前端海报隐藏对应区块或展示引导）。
+- 无数据边界：全零用户返回 0 值（前端海报可展示"开始第一题"引导）。
+
+### 12.9 差异总表（vs M3）与端点总数
+
+新增 8 个端点（全部新增，无废弃）：
+
+`POST /chat/explain/{session_id}/tts`、`GET /tts/audio/{file_hash}.mp3`、`POST /questions/ugc`、`GET /admin/questions/ugc`、`POST /admin/questions/{id}/review`、`POST /me/class`、`GET /me/class`、`GET /me/share-card`
+
+修订 1 个端点：`GET /leaderboard`（scope 枚举增加 `class`，§12.7）。
+
+> 合计：**43 端点**（M3 35 + M3.5 新增 8）。§11 为 M3 快照，M3.5 增量以本节为准。
+
+### 12.10 实现备注（各角色）
+
+- **T20（ep-backend）**：按本契约实现路由与 schema；新增 `backend/app/schemas/`：`tts.py`（12.1/12.2）、`ugc.py`（12.3~12.5）、`classroom.py`（12.6/12.7）、`share_card.py`（12.8）；`leaderboard.py` 增量（scope=class）。admin 依赖注入（users.role='admin'）。小表迁移见 architecture.md §12.5（classes / users.class_id / questions 扩展，`0004_m35_*` 迁移 + database.md §10）。
+- **T21（ep-ai）**：`tts_service.py`（edge-tts 封装 + 文本清洗 + 磁盘缓存）、`ugc_service.py`（预检规则 + 可选自动审核）；单测覆盖 TTS 字节非空与参数校验、UGC 预检规则边界（backend/tests/test_ai_m35.py）。
+- **T22（ep-frontend）**：按本契约对接；语音播放 `uni.createInnerAudioContext()`；UGC 投稿入口（OCR 预览页"投稿共建"）；班级页（建班/加入/展示）+ 排行榜 scope 切换；海报 canvas（type=2d / H5 canvas → saveImageToPhotosAlbum / toDataURL 下载）；mock 保留降级（frontend/src/mock/）。
+- **T23（ep-qa）**：按 §12.5 UGC 状态机边界、§12.6/§12.7 班级加入与未加入边界、§12.1 TTS mock 生成与参数校验、§12.8 分享卡聚合口径写断言（见 docs/ops/M3.5-taskgraph.md 验收清单）。
+- 变更流程：改端点/字段必须先改本文档 + architecture.md §12 对应小节，再改代码；评审由 ep-arch。
+
+---
