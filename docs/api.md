@@ -1,9 +1,9 @@
-# AceExam API 契约（M3）
+# AceExam API 契约（M4）
 
-> **状态**：M3.5 v1.1（2026-08-08）｜**作者**：ep-arch
-> **定位**：前后端对接的唯一依据（Pydantic schema 级字段定义）。模块设计见 [architecture](./architecture.md)（§10 M2 五件套、§11 M3 图谱/突击/看板/排行/预警、§12 M3.5 TTS/UGC/海报/班级）；表结构见 [database](./database.md)；需求见 [PRD](./PRD.md)。
+> **状态**：M4 v1.2（2026-08-08）｜**作者**：ep-arch
+> **定位**：前后端对接的唯一依据（Pydantic schema 级字段定义）。模块设计见 [architecture](./architecture.md)（§10 M2 五件套、§11 M3 图谱/突击/看板/排行/预警、§12 M3.5 TTS/UGC/海报/班级、§13 M4 专业选课/课程广场）；表结构见 [database](./database.md)；需求见 [PRD](./PRD.md)。
 > **评审**：接口契约由 ep-arch 评审后锁定；任何变更必须同步修改本文档 + 相关代码，禁止只改代码。
-> **覆盖范围**：M1 已交付端点（§1~§4 简述）+ M2 五件套端点（§5~§8 详述）+ 与 M1 差异总表（§9）+ M2 实现备注（§10）+ M3 新增端点（§11）+ M3.5 新增端点（§12）。
+> **覆盖范围**：M1 已交付端点（§1~§4 简述）+ M2 五件套端点（§5~§8 详述）+ 与 M1 差异总表（§9）+ M2 实现备注（§10）+ M3 新增端点（§11）+ M3.5 新增端点（§12）+ M4 专业选课/课程广场端点（§13）。
 
 ---
 
@@ -1049,3 +1049,108 @@ Query：无（MVP 缺省全部科目）。
 - 变更流程：改端点/字段必须先改本文档 + architecture.md §12 对应小节，再改代码；评审由 ep-arch。
 
 ---
+
+---
+
+## 13. M4 增量：专业选课 / 课程广场 API
+
+> 本节是 M4 的端点级契约（用户反馈驱动：首页改为「用户自选课程」，公共课独立成「课程广场」）。模块设计见 architecture.md §13；表增量见 database.md §11（T25 落地，迁移 `0005_user_major_plaza`）。
+
+### 13.1 PUT /me/profile（新增，更新专业）
+
+| 项 | 值 |
+|---|---|
+| 鉴权 | 登录 |
+| 请求 | `{"major": str}`（1..100，自由文本，去首尾空白；允许置空 `""` 表示清除） |
+| 响应 200 | `{"id": "uuid", "username": "zhangsan", "major": "计算机科学与技术", "role": "student", "is_member": false, "member_expires_at": null, "created_at": "..."}`（= UserPublic 扩展 major，与 GET /auth/me 同构） |
+| 错误 | 400 `VALIDATION_ERROR`（空串/超长/类型错）；401 `UNAUTHORIZED` |
+
+实现要点（context7 核对 FastAPI 写法）：
+- Pydantic 模型 `ProfileUpdate`：`major: str | None = None`（None 或 "" 均表示清除，语义统一）；`model_dump(exclude_unset=True)` 后写库。
+- `response_model=UserPublic`（users 表新增 major 字段后同步扩展 schema）。
+
+### 13.2 PUT /me/subjects（新增，设置本学期课程）
+
+| 项 | 值 |
+|---|---|
+| 鉴权 | 登录 |
+| 请求 | `{"subject_ids": [uuid]}`（可为空数组 = 清空；重复 id 去重） |
+| 响应 200 | `{"items": [UserSubjectItem], "total": int}`（= GET /me/subjects 同构，便于前端一次拿到结果） |
+| 错误 | 401 `UNAUTHORIZED`；422 `SUBJECT_NOT_JOINABLE`（含 is_public=false / is_active=false / 不存在的 subject_id，detail 列出非法 id）；400 `VALIDATION_ERROR` |
+
+语义：
+- **幂等全量覆盖**：同事务先删该用户所有 `user_subjects` 再插入给定列表；重复提交相同数组结果一致（对比 last_updated 可跳过写库，非必须）。
+- 排序：按请求数组顺序写入 created_at 递增序列（第 1 个最早），`GET /me/subjects` 按 created_at 升序返回，与勾选顺序一致。
+- 不要求非空（空数组合法 = 本学期不选课，引导页"跳过"语义）。
+
+### 13.3 GET /me/subjects（新增，用户自选课程列表）
+
+| 项 | 值 |
+|---|---|
+| 鉴权 | 登录 |
+| 响应 200 | `{"items": [UserSubjectItem], "total": int}` |
+
+UserSubjectItem：
+
+```json
+{
+  "subject": {"id": "uuid", "code": "math_gaoshu", "name": "高等数学", "description": "...", "is_public": true, "is_active": true},
+  "joined_at": "2026-08-08T10:00:00Z",
+  "stats": {
+    "question_count": 42,
+    "correct_count": 30,
+    "accuracy": 0.714,
+    "mastery": 0.62,
+    "knowledge_points": {"total": 18, "mastered": 8, "weak": 3},
+    "streak": 5
+  }
+}
+```
+
+实现要点：
+- 学习状态实时聚合（不落表）：`question_count` = study_sessions 做题记录数、`accuracy` = correct_count / question_count、`mastery` = 掌握度（口径沿用 §11.4 dashboard / user_knowledge_states 聚合）、`weak` = 薄弱知识点数（沿用 §11.7 口径）。
+- 聚合一次 join 完成（user_subjects LEFT JOIN 各统计子查询），避免 N+1；数据量小时 GROUP BY 直查即可，>1k 用户再评估缓存（§13.4 预留）。
+- 空列表返回 `{"items": [], "total": 0}`。
+
+### 13.4 GET /subjects/plaza（新增，课程广场）
+
+| 项 | 值 |
+|---|---|
+| 鉴权 | 游客白名单（未登录可看列表，joined 恒 false） |
+| 响应 200 | `{"items": [PlazaSubject], "total": int}` |
+
+PlazaSubject：
+
+```json
+{
+  "id": "uuid",
+  "code": "eng_college",
+  "name": "大学英语",
+  "description": "...",
+  "is_public": true,
+  "is_active": true,
+  "joined": true,
+  "question_count": 320
+}
+```
+
+实现要点：
+- 仅返回 `is_public=true AND is_active=true`，按 `sort_order, name` 排序。
+- `joined` = 当前用户（登录时）是否在 `user_subjects` 中；未登录恒 false。
+- `question_count` = 公共题库量（status='active' 计数，用于广场"题量充足/建设中"展示；无题显示 0，前端降级展示）。
+- 列表查询：`GET /subjects`（M1）语义保持不动，本端点为广场专用子集（含 joined 状态）。
+
+### 13.5 差异总表（vs M3.5）与端点总数
+
+新增 4 个端点（全部新增，无废弃、无修订）：
+
+`PUT /me/profile`、`PUT /me/subjects`、`GET /me/subjects`、`GET /subjects/plaza`
+
+> 合计：**47 端点**（M3.5 43 + M4 新增 4）。§12 为 M3.5 快照，M4 增量以本节为准。
+
+### 13.6 实现备注（各角色）
+
+- **T25（ep-backend）**：按本契约实现路由与 schema；`backend/app/schemas/` 新增 `me.py`（ProfileUpdate / SubjectIdsUpdate / UserSubjectItem / PlazaSubject）；`backend/app/api/v1/me.py`（13.1~13.3）+ `subjects.py` 扩展（13.4）；models：users.major、subjects.is_public、user_subjects 新表；Alembic 迁移 `0005_user_major_plaza`（**修正 body 草案的 0004 编号冲突**，down_revision=0004_m35_classes_ugc）；seed 回填 is_public + 新增线代/概率论/大物种子。
+- **T26（ep-frontend）**：按本契约对接；选课引导页（PUT /me/profile + PUT /me/subjects）、首页「我的课程」（GET /me/subjects）、课程广场页（GET /subjects/plaza + 加入按钮）；「我的」页专业编辑入口；mock 降级保留。
+- **T27（ep-qa）**：按 §13 边界断言——PUT /me/profile 401/400、PUT /me/subjects 幂等覆盖 + 422 SUBJECT_NOT_JOINABLE、GET /me/subjects 统计口径、GET /subjects/plaza 游客/登录 joined 差异；0005 迁移可执行（alembic upgrade head --sql 或等效）；回归 subjects/questions/practice 主链路。
+- 变更流程：改端点/字段必须先改本文档 + architecture.md §13 对应小节，再改代码；评审由 ep-arch。

@@ -1,11 +1,12 @@
 # AceExam 架构设计（M1 基线）
 
-> **状态**：M3.5 增量 v1.3（2026-08-08）｜**作者**：ep-arch
+> **状态**：M4 增量 v1.4（2026-08-08）｜**作者**：ep-arch
 > **定位**：本文件是系统设计的事实来源。需求唯一事实来源是 [PRD](./PRD.md)；视觉/交互见 [design/](./design/)；表结构与 API 契约分别以 [database](./database.md) 与 [api](./api.md) 为准（评审后锁定，变更走文档）。
 > **配套决策**：关键技术决策固化在 [docs/adr/](../adr/)（ADR-0001 ~ 0003）。
 > **M2 增量说明**：M1 基线（§1~§9）保持不动；MVP 五件套（智能刷题/AI 讲解/拍照录题/薄弱诊断/备考计划）的模块设计在 §10 增量追加，API 契约详版见 [docs/api.md](./api.md)。
 > **M3 增量说明**：§10 五件套保持不动；体验增强与增长功能（知识点图谱可视化 / 考前突击模式 / 打卡连胜 / 学习数据看板 / 排行榜 / 挂科预警）的模块设计在 §11 增量追加；API 契约增量见 [docs/api.md](./api.md) §11；表结构增量由 T14 落地 [docs/database.md](./database.md) §9；任务图见 [docs/ops/M3-taskgraph.md](./ops/M3-taskgraph.md)。
 > **M3.5 增量说明**：§11 保持不动；M3 剩余功能（语音讲解 TTS / UGC 题库共建 / 成绩单海报分享 / 班级排行榜）的模块设计在 §12 增量追加；API 契约增量见 [docs/api.md](./api.md) §12；表结构增量由 T20 落地 [docs/database.md](./database.md) §10；任务图见 [docs/ops/M3.5-taskgraph.md](./ops/M3.5-taskgraph.md)。
+> **M4 增量说明**：§12 保持不动；用户反馈驱动的产品调整（用户自填专业 + 自选本学期课程，公共课独立为课程广场）的模块设计在 §13 增量追加；API 契约增量见 [docs/api.md](./api.md) §13；表结构增量由 T25 落地 [docs/database.md](./database.md) §11（迁移 `0005_user_major_plaza`，修正 T25 body 中的 0004 编号冲突）；任务图见 [docs/ops/M4-taskgraph.md](./ops/M4-taskgraph.md)。
 
 ---
 
@@ -15,13 +16,14 @@
 |---|---|---|
 | `docs/PRD.md` | 需求唯一事实来源（功能分层/核心闭环/题库策略） | v0.1 已定 |
 | `docs/design/*` | 页面地图 / 设计系统 / 组件 / 交互流程 | 已定 |
-| **`docs/architecture.md`（本文）** | 系统模块划分、科目模板、RAG 管线、LLM 分级、API 骨架、ADR 索引、M2 五件套 + M3 图谱/突击/看板/排行/预警 + M3.5 TTS/UGC/海报/班级模块设计 | **M3.5 增量 v1.3** |
-| `docs/database.md` | 表结构（M1 基线；M2 §8 / M3 §9 / M3.5 §10 增量） | M1 锁定，M2 §8 已交付，M3 §9 已交付，M3.5 §10 由 T20 |
-| `docs/api.md` | API 契约详版（Pydantic 级字段定义 + 各里程碑差异表） | **M3.5 v1.1（43 端点）** |
+| **`docs/architecture.md`（本文）** | 系统模块划分、科目模板、RAG 管线、LLM 分级、API 骨架、ADR 索引、M2 五件套 + M3 图谱/突击/看板/排行/预警 + M3.5 TTS/UGC/海报/班级 + M4 专业选课/课程广场模块设计 | **M4 增量 v1.4** |
+| `docs/database.md` | 表结构（M1 基线；M2 §8 / M3 §9 / M3.5 §10 / M4 §11 增量） | M1 锁定，M2 §8 已交付，M3 §9 已交付，M3.5 §10 由 T20，M4 §11 由 T25 |
+| `docs/api.md` | API 契约详版（Pydantic 级字段定义 + 各里程碑差异表） | **M4 v1.2（47 端点）** |
 | `docs/ops/M1-taskgraph.md` | M1 里程碑任务图与启动手册 | 已存在，T1 完善 |
 | `docs/ops/M2-taskgraph.md` | M2 里程碑任务图（T7~T12） | T7 产出 |
 | `docs/ops/M3-taskgraph.md` | M3 里程碑任务图（T13~T18） | T13 产出 |
 | `docs/ops/M3.5-taskgraph.md` | M3.5 里程碑任务图（T19~T23） | T19 产出 |
+| `docs/ops/M4-taskgraph.md` | M4 任务图（T24~T27：专业选课 + 课程广场） | T24 产出 |
 
 **规则**：接口契约（API 字段、表结构）由 ep-arch 评审后锁定；任何变更必须同步修改本文档 + 对应交付文档，禁止只改代码。
 
@@ -1016,3 +1018,111 @@ GET /tts/audio/{file_hash}.mp3
 | D12 | 海报生成 | 前端 canvas 生成（type=2d / H5 canvas），后端只聚合（GET /me/share-card）；小程序 saveImageToPhotosAlbum / H5 toDataURL 下载 |
 | D13 | UGC 与 from-ocr 关系 | 共用 OCR 管线与 source='ugc'；from-ocr=个人录题直接 active，/questions/ugc=投稿进审核流 |
 | D14 | TTS 缓存存储 | 磁盘文件缓存（sha256 文件名），不建表（无 LLM 成本，mtime 清理） |
+
+---
+
+## 13. M4 增量：用户专业与选课 / 课程广场
+
+> 本节是 M4 的模块级设计，在 M3.5 基线上增量追加（§1~§12 不重写）。**接口契约（字段级）以 [docs/api.md](./api.md) §13 为准；表结构变更以 [docs/database.md](./database.md)（T25 增量）为准。**
+> 触发背景（用户反馈）：首页不再直接展示全部科目，改为"用户自填专业 + 自选本学期课程"，公共课独立成「课程广场」页。
+
+### 13.1 概念：两个课程域（用户自选 vs 系统公共）
+
+首页信息架构调整后，`subject` 概念拆分为两个视图域，**同一张 `subjects` 表、同一个 subject_id 维度**：
+
+| 域 | 来源 | 展示位置 | 数据来源 |
+|---|---|---|---|
+| **用户自选课程**（我的课程） | 用户在选课引导/广场加入的课程 | 首页「我的课程」区块 | `user_subjects` 关联表（用户维度） |
+| **系统公共课程**（课程广场） | 平台内置/管理的公共课种子（高数、英语、线代、概率论、大物…） | 「课程广场」页 | `subjects` 表 `is_public=true` |
+
+- 一个科目可以同时属于两个域：用户加入公共课后，既在广场出现（可再次看到/移出），也在「我的课程」出现。
+- **不加科目类型枚举**，只加 `is_public` 布尔：本阶段所有科目都是公共课候选，`is_public` 只决定是否出现在广场；未来若有"用户私有/专业定制课"再扩展类型字段（ADR-0001 模板约束下属于配置维度，不破坏本设计）。
+
+### 13.2 数据模型（T25 落地）
+
+```
+users
+└── major VARCHAR(100) NULL          -- 新增：专业自由文本（用户自填，不建专业表/字典）
+
+user_subjects                         -- 新增：用户自选课程关联表（多对多）
+├── user_id    UUID FK → users.id
+├── subject_id UUID FK → subjects.id
+├── created_at TIMESTAMPTZ NOT NULL DEFAULT now()   -- 加入时间（排序用）
+└── PRIMARY KEY (user_id, subject_id)               -- 同一课程不可重复加入
+    INDEX ix_user_subjects_user (user_id, created_at)
+
+subjects
+└── is_public BOOLEAN NOT NULL DEFAULT false        -- 新增：true=出现在课程广场（公共课）
+```
+
+要点：
+- **幂等覆盖**：`PUT /me/subjects` 传 `subject_ids` 数组 = 全量覆盖（先删后插同事务），重复提交结果一致；不提供增量增删（MVP 简化，前端一次勾选提交）。
+- **不加 semester/学期字段**：MVP 单学期制，`user_subjects` 即"本学期课程"；多学期切换 V2 再评估（决策 D18）。
+- 学习状态（做题量/正确率/掌握度）**不落关联表**：实时聚合 `user_knowledge_states` / `study_sessions` / `wrong_answers`（口径沿用 §11.4 dashboard 定义），关联表只管"选了什么课"。
+
+### 13.3 首页数据流
+
+```
+首次登录（major 为空 或 user_subjects 为空）
+   └─▶ 选课引导页：输入专业（PUT /me/profile {major}）→ 从广场勾选课程（PUT /me/subjects {subject_ids}）
+        └─▶ 完成进入首页；可跳过（后续「我的」页可改）
+
+首页加载（已配置）
+   ├─ GET /me/subjects      → 「我的课程」卡片列表（含每科掌握度/进度）
+   ├─ GET /plans/active     → 今日任务/倒计时/打卡（保留 §8.2）
+   └─ GET /me/warnings      → 挂科预警（保留 §11.7）
+   「课程广场」入口卡片 → GET /subjects/plaza → 广场页（公共课列表 + 加入状态 + 加入按钮）
+```
+
+- `GET /subjects/plaza` 返回 `is_public=true` 的科目 + 当前用户是否已加入（`joined` 布尔）；未登录可看列表（游客白名单），`joined` 恒 false。
+- `GET /me/subjects` 仅返回用户已加入的科目（按 `user_subjects.created_at` 排序），每项含学习状态聚合（做题量 / 正确率 / 掌握度）。
+- `GET /subjects`（M1）保持兼容不动，作为广场数据源/管理端通用列表。
+
+### 13.4 边界与规则
+
+1. **加入校验**：`PUT /me/subjects` 的 subject_ids 必须存在且 `is_active=true`；`is_public=false` 的科目**不允许**用户自选加入（管理端专用，防越权）→ 422 `SUBJECT_NOT_JOINABLE`。
+2. **空数组** = 清空本学期课程（合法，前端引导页"跳过"语义由前端控制，后端不强制非空）。
+3. **major 约束**：自由文本，长度 1..100，去首尾空白；空串/全空白 → 400 `VALIDATION_ERROR`；不做专业枚举校验（V2 可选联想）。
+4. **对既有链路影响**：`GET /subjects` 语义不变；刷题/诊断/计划等所有带 `subject_id` 的接口不受影响（用户从「我的课程」进入刷题，subject_id 照常传）。
+
+### 13.5 表结构增量（与 ep-db 的约定，T25 落地）
+
+> 架构层面锁定以下表/字段需求；DDL 与迁移由 T25 落地（`backend/alembic/versions/0005_user_major_plaza.py`）并同步更新 `docs/database.md` §11（评审后锁定，禁止手改）。
+> ⚠️ **迁移编号修正**：T25 body 草案写的 `0004_user_major_plaza` 与既有 `0004_m35_classes_ugc.py` 冲突，**实际迁移必须为 `0005_user_major_plaza`**（down_revision=0004_m35_classes_ugc）。
+
+1. **`users.major`（新列）**：`VARCHAR(100) NULL`（自由文本，可空）。
+2. **`user_subjects`（新表）**：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| user_id | UUID FK → users.id | 复合主键 |
+| subject_id | UUID FK → subjects.id | 复合主键 |
+| created_at | TIMESTAMPTZ NOT NULL DEFAULT now() | 加入时间（列表排序） |
+
+索引：`PRIMARY KEY (user_id, subject_id)` + `ix_user_subjects_user (user_id, created_at)`（按用户取列表）。级联删除：user_id → CASCADE（删用户清选课）；subject_id → CASCADE（删科目清关联）。
+
+3. **`subjects.is_public`（新列）**：`BOOLEAN NOT NULL DEFAULT false`；索引 `ix_subjects_is_public (is_public, is_active, sort_order)`（广场列表）。
+4. **种子数据（seed 更新）**：现有高数（math_gaoshu）/英语（eng_college）标 `is_public=true`；新增线性代数、概率论、大学物理为 `is_public=true` 公共课（有题最好，无题仅展示也可，题量不足时前端展示"建设中"）。
+
+### 13.6 M4 新增/调整的代码文件总览（角色边界）
+
+| 文件 | 归属 | 说明 |
+|---|---|---|
+| `backend/app/api/v1/me.py`（新增/扩展）、`backend/app/schemas/me.py`（或 profile.py） | T25 | PUT /me/profile、PUT /me/subjects、GET /me/subjects（§13.3 + api.md §13） |
+| `backend/app/api/v1/subjects.py`（扩展） | T25 | GET /subjects/plaza（广场列表 + joined 状态） |
+| `backend/app/models/`（users/subjects/user_subjects）、`backend/alembic/versions/0005_user_major_plaza.py`、`docs/database.md` §11 | T25 | 表增量（§13.5） |
+| `backend/app/services/`（如需要） | T25 | 学习状态聚合纯函数（做题量/正确率/掌握度，口径复用 dashboard 定义；若已有现成聚合则直接复用） |
+| `backend/app/db/seed.py`（或种子脚本） | T25 | is_public 回填 + 新增公共课种子 |
+| `frontend/` | T26 | 选课引导页、首页「我的课程」改造、课程广场页、「我的」页专业编辑入口（设计见 design/pages.md，T26 同步） |
+| `backend/tests/`、`docs/qa/` | T27 | 专业/选课/广场验收测试 + 迁移可执行验证（api.md §13 用例） |
+
+> 冲突规避：无 AI 服务新文件（选课/广场为纯 CRUD + 聚合），T25 一人完成 API + 迁移 + 种子即可；若 ep-db 并行处理 db 目录需按 T25 body 约定协调避免冲突。
+
+### 13.7 M4 决策锁定表
+
+| # | 决策 | 定案 |
+|---|---|---|
+| D15 | 课程域建模 | 单一 `subjects` 表 + `is_public` 布尔区分广场公共课；不建独立类型枚举/第二张科目表（ADR-0001 模板约束下是配置维度） |
+| D16 | 用户选课建模 | `user_subjects` 多对多关联表（复合主键防重复）；幂等覆盖式 PUT（先删后插同事务）；学习状态实时聚合不落表 |
+| D17 | 广场游客边界 | `GET /subjects/plaza` 游客白名单可看（joined=false）；加入/修改必须登录 |
+| D18 | 学期维度 | MVP 单学期制，`user_subjects` 即本学期课程，不建 semester 字段；多学期切换 V2 再评估（加 `semester` 列或独立选课记录表） |
