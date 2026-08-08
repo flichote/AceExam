@@ -4,12 +4,18 @@ M2 changes vs M1:
 - SSE uses structured events (delta/step/citations/done) per api.md section 0.4
 - 'model' field in non-streaming response
 - Proper step/citation structure
+
+M3.5: TTS endpoint (§12.1) — voice synthesis from chat explanation
 """
+import hashlib
+import os
 import secrets
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +23,7 @@ from app.api.deps import get_current_member
 from app.db import get_db
 from app.db.models import ChatSession, Question, User
 from app.schemas.chat import ChatExplainRequest, ChatFollowupRequest, ChatResponse
+from app.schemas.tts import TTSRequest, TTSResponse
 from app.services.llm_gateway import llm_gateway
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -186,4 +193,96 @@ async def followup(
         citations=[],
         uncovered=False,
         model="flash",
+    )
+
+
+# ── M3.5 TTS ──
+
+_VALID_VOICES = {"zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural"}
+_TTS_CACHE_DIR = Path("backend/media/tts")
+
+
+def _clean_text_for_tts(messages: list[dict]) -> str:
+    """从 chat_sessions.messages 中提取最后一条 assistant 消息的讲解文本。"""
+    for msg in reversed(messages):
+        if msg.get("role") == "assistant":
+            content = msg.get("content", "")
+            # 简单清洗：去 LaTeX 标记（$...$ 替换为空格）
+            import re
+            content = re.sub(r'\$[^$]*\$', '', content)
+            return content.strip()
+    return ""
+
+
+@router.post("/explain/{session_id}/tts", response_model=TTSResponse)
+async def generate_tts(
+    session_id: str,
+    body: TTSRequest = TTSRequest(),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_member),
+):
+    if body.voice not in _VALID_VOICES:
+        raise HTTPException(status_code=422, detail=f"Invalid voice. Choose from: {_VALID_VOICES}")
+
+    # Validate session
+    result = await db.execute(
+        select(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == user.id)
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    # Extract explanation text
+    text = _clean_text_for_tts(session.messages)
+    if not text:
+        raise HTTPException(status_code=404, detail="No explanation content found")
+
+    # Cache key
+    cache_key = hashlib.sha256((text + body.voice).encode()).hexdigest()
+    cache_file = _TTS_CACHE_DIR / f"{cache_key}.mp3"
+    audio_url = f"/api/v1/tts/audio/{cache_key}.mp3"
+
+    cache_hit = cache_file.exists()
+    text_preview = text[:100] + "……" if len(text) > 100 else text
+
+    try:
+        if not cache_hit:
+            import edge_tts
+            import asyncio as _asyncio
+
+            _TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            communicate = edge_tts.Communicate(text, body.voice)
+            # Write to temp file then rename atomically
+            tmp_file = cache_file.with_suffix(".tmp")
+            with open(tmp_file, "wb") as f:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        f.write(chunk["data"])
+            tmp_file.rename(cache_file)
+
+        return TTSResponse(
+            session_id=session_id,
+            audio_url=audio_url,
+            voice=body.voice,
+            text_preview=text_preview,
+            cache_hit=cache_hit,
+            created_at=datetime.now(timezone.utc),  # type: ignore[arg-type]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"TTS service unavailable: {e}")
+
+
+@router.get("/tts/audio/{file_hash}.mp3")
+async def get_tts_audio(
+    file_hash: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_member),
+):
+    cache_file = _TTS_CACHE_DIR / f"{file_hash}.mp3"
+    if not cache_file.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found — regenerate TTS")
+    return FileResponse(
+        path=str(cache_file),
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": "inline"},
     )

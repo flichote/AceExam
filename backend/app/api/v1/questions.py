@@ -1,4 +1,5 @@
-"""Questions router -- list / create / submit + M2 practice/answers/from-ocr."""
+"""Questions router -- list / create / submit + M2 practice/answers/from-ocr + M3.5 UGC."""
+import hashlib
 import uuid
 from datetime import datetime, timezone
 
@@ -29,6 +30,7 @@ from app.schemas.questions import (
     SubmitAnswerRequest,
     SubmitAnswerResponse,
 )
+from app.schemas.ugc import UGCQuestionRequest, UGCQuestionResponse
 from app.services.plan_service import apply_answer, increment_session_stats
 from app.services.selection import select_practice_questions
 
@@ -368,5 +370,69 @@ async def confirm_ocr_question(
         question_id=str(question.id),
         upload_id=str(upload.id),
         status="confirmed",
+        duplicated=False,
+    )
+
+
+# ── M3.5: UGC question submission ──
+
+@router.post("/questions/ugc", response_model=UGCQuestionResponse, status_code=status.HTTP_201_CREATED)
+async def submit_ugc_question(
+    body: UGCQuestionRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # Pre-check: content length ≥ 15
+    if len(body.content.strip()) < 15:
+        raise HTTPException(status_code=422, detail="Content must be at least 15 characters")
+
+    # Pre-check: type-answer match (simple: single/multi → answer must be string/list of options keys)
+    if body.type in ("single", "multi") and body.options:
+        option_keys = {opt["key"] for opt in body.options if isinstance(opt, dict)}
+        if body.type == "single":
+            if not isinstance(body.answer, str) or body.answer not in option_keys:
+                raise HTTPException(status_code=422, detail="Answer must match one of the option keys")
+        elif body.type == "multi":
+            answers = body.answer if isinstance(body.answer, list) else [body.answer]
+            if not all(a in option_keys for a in answers):
+                raise HTTPException(status_code=422, detail="All answers must match option keys")
+
+    # Duplicate check: content hash
+    content_hash = hashlib.sha256(body.content.strip().encode()).hexdigest()
+    dup_res = await db.execute(
+        select(Question).where(
+            Question.subject_id == body.subject_id,
+            Question.status.in_(["pending", "active"]),
+        )
+    )
+    for q in dup_res.scalars().all():
+        q_hash = hashlib.sha256(q.content.strip().encode()).hexdigest()
+        if q_hash == content_hash:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "DUPLICATE", "message": "Similar question already exists", "detail": {"question_id": str(q.id)}},
+            )
+
+    # Create question with status=pending
+    question = Question(
+        subject_id=body.subject_id,
+        knowledge_point_id=body.knowledge_point_id,
+        type=body.type,
+        content=body.content.strip(),
+        options=[opt if isinstance(opt, dict) else opt for opt in (body.options or [])],
+        answer=body.answer,
+        analysis=body.analysis,
+        difficulty=3,
+        source="ugc",
+        status="pending",
+        submitted_by=user.id,
+    )
+    db.add(question)
+    await db.commit()
+    await db.refresh(question)
+
+    return UGCQuestionResponse(
+        question_id=str(question.id),
+        status="pending",
         duplicated=False,
     )

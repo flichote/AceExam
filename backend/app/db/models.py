@@ -45,6 +45,9 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="student")
     is_member: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     member_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    class_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("classes.id", use_alter=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
@@ -91,9 +94,10 @@ class Question(Base):
         CheckConstraint(
             "source IN ('textbook','past_exam','self_built','ugc')", name="ck_questions_source"
         ),
-        CheckConstraint("status IN ('draft','active','archived')", name="ck_questions_status"),
+        CheckConstraint("status IN ('draft','pending','active','rejected','archived')", name="ck_questions_status"),
         Index("ix_questions_subject_kp_diff", "subject_id", "knowledge_point_id", "difficulty"),
         Index("ix_questions_subject_status", "subject_id", "status"),
+        Index("ix_questions_status_created", "status", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -107,6 +111,10 @@ class Question(Base):
     difficulty: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="self_built")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    submitted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
@@ -365,6 +373,26 @@ class DiagnosisReport(Base):
     answers: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # 作答快照 [{question_id,answer,correct}]
     weak_top5: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # 薄弱 Top5 快照 [{rank,knowledge_point_id,accuracy,practice_count,status,suggestion}]
     report_text: Mapped[str | None] = mapped_column(Text, nullable=True)  # LLM 措辞：summary + suggested_next_steps（JSON 字符串）
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class Class(Base):
+    """班级（M3.5 新表，架构 §12.5）。
+
+    成员数通过 COUNT users.class_id 实时推导，不落列。
+    """
+
+    __tablename__ = "classes"
+    __table_args__ = (
+        UniqueConstraint("invite_code", name="uq_classes_invite_code"),
+        Index("ix_classes_invite_code", "invite_code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    invite_code: Mapped[str] = mapped_column(String(6), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 

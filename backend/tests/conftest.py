@@ -18,6 +18,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.pool import StaticPool
 
 # ── SQLite 兼容：postgresql.JSONB → JSON（模型层使用 JSONB，SQLite 无原生 JSONB）──
 @compiles(JSONB, "sqlite")
@@ -59,6 +60,7 @@ _PgUUID.bind_processor = _sqlite_uuid_bind_processor
 # 必须在创建引擎前导入模型，让所有表注册到 Base.metadata
 from app.db.base import Base  # noqa: E402
 from app.db.models import (  # noqa: E402,F401
+    Class,
     KnowledgePoint,
     Question,
     Subject,
@@ -69,7 +71,7 @@ from app.db import get_db  # noqa: E402
 from app.main import app  # noqa: E402
 
 TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL", "sqlite+aiosqlite:///./test_aceexam.db"
+    "TEST_DATABASE_URL", "sqlite+aiosqlite:///./test_aceexam.db?_journal_mode=WAL"
 )
 SQLITE_FILE = Path("test_aceexam.db")
 
@@ -82,12 +84,23 @@ SQLITE_FILE = Path("test_aceexam.db")
 @pytest.fixture(scope="session")
 async def test_engine():
     """Session 级测试引擎（SQLite 文件或 TEST_DATABASE_URL 指定的 PG）。"""
-    engine = create_async_engine(TEST_DATABASE_URL)
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        connect_args={
+            "timeout": 30,
+            "check_same_thread": False,
+        } if TEST_DATABASE_URL.startswith("sqlite") else {},
+    )
     yield engine
     await engine.dispose()
     # 清理 SQLite 文件
     if TEST_DATABASE_URL.startswith("sqlite") and SQLITE_FILE.exists():
         SQLITE_FILE.unlink(missing_ok=True)
+        # Clean WAL + SHM files
+        for ext in (".db-wal", ".db-shm"):
+            p = SQLITE_FILE.with_suffix(ext)
+            if p.exists():
+                p.unlink(missing_ok=True)
 
 
 @pytest.fixture

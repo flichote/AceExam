@@ -1,4 +1,4 @@
-"""Leaderboard router (M3 §11.6)."""
+"""Leaderboard router (M3 §11.6 / M3.5 §12.7)."""
 import uuid
 from datetime import date
 
@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.db.models import StudySession, User
-from app.schemas.leaderboard import LeaderboardItem, LeaderboardMe, LeaderboardResponse
+from app.db.models import Class, StudySession, User
+from app.schemas.leaderboard import ClassMeta, LeaderboardItem, LeaderboardMe, LeaderboardResponse
 from app.services.streak import compute_streak
 
 router = APIRouter(tags=["leaderboard"])
@@ -21,7 +21,7 @@ _MIN_ACCURACY = 0.1  # below this → suspicious, excluded
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
 async def leaderboard(
-    scope: str = Query("global", pattern="^(global|subject)$"),
+    scope: str = Query("global", pattern="^(global|subject|class)$"),
     subject_id: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=50),
@@ -31,7 +31,34 @@ async def leaderboard(
     if scope == "subject" and not subject_id:
         raise HTTPException(status_code=422, detail="subject_id is required when scope=subject")
 
+    # M3.5: class scope
+    class_meta = None
+    if scope == "class":
+        if not user.class_id:
+            raise HTTPException(status_code=422, detail="CLASS_NOT_JOINED")
+        cls_res = await db.execute(select(Class).where(Class.id == user.class_id))
+        cls = cls_res.scalar_one_or_none()
+        if not cls:
+            raise HTTPException(status_code=422, detail="CLASS_NOT_JOINED")
+        cnt_res = await db.execute(
+            select(func.count()).select_from(User).where(User.class_id == cls.id)
+        )
+        class_meta = ClassMeta(
+            id=str(cls.id),
+            name=cls.name,
+            member_count=cnt_res.scalar() or 0,
+        )
+
+    # Build base query
     sid_filter = [StudySession.subject_id == uuid.UUID(subject_id)] if subject_id else []
+
+    # For class scope, restrict to class members
+    if scope == "class":
+        class_user_ids = (
+            select(User.id).where(User.class_id == user.class_id)
+        )
+    else:
+        class_user_ids = None
 
     # Aggregate per user
     agg_query = (
@@ -44,6 +71,8 @@ async def leaderboard(
     )
     if sid_filter:
         agg_query = agg_query.where(*sid_filter)
+    if class_user_ids is not None:
+        agg_query = agg_query.where(StudySession.user_id.in_(class_user_ids))
 
     agg_result = await db.execute(agg_query)
     all_users = list(agg_result.all())
@@ -85,7 +114,6 @@ async def leaderboard(
     today = date.today()
     items = []
     for rank, (uid, total_q, total_c, acc) in enumerate(page_items, start=start + 1):
-        # Get streak for this user
         streak_result = await db.execute(
             select(StudySession.session_date)
             .where(
@@ -116,6 +144,7 @@ async def leaderboard(
         if uid == me_uid:
             me_qp = total_q
             me_correct = total_c
+
     if me_qp >= _MIN_SAMPLE or me_qp > 0:
         me_acc = me_correct / me_qp if me_qp > 0 else 0.0
         me_rank = None
@@ -138,4 +167,5 @@ async def leaderboard(
         page_size=page_size,
         total=total,
         me=me,
+        class_=class_meta,
     )
