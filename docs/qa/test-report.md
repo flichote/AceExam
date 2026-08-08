@@ -561,10 +561,10 @@ PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m35_tts_api.py -v     
 | 文件 | 用例数 | 覆盖 |
 |---|---|---|
 | `tests/test_m4_subjects_plaza.py`（T25 交付） | 14 passed / 3 skipped | 基础路径：major 更新/清除/401、PUT/GET /me/subjects、422 SUBJECT_NOT_JOINABLE、plaza 游客/登录、schema 扩展（major/is_public） |
-| `tests/test_m4_plaza_acceptance.py`（T27 新增） | 13 passed / 1 xfailed | 契约边界补充：major 空白 strip/超长/100 边界、**幂等覆盖语义（D-29 xfail）**、清空后重设、返回顺序=请求数组顺序、stats 数值口径（q/correct/accuracy/mastery/kp/streak）、零记录零值、plaza joined 真实状态（加入 true/未加入 false）、私有课不进广场、sort_order 排序、question_count 仅计 active |
+| `tests/test_m4_plaza_acceptance.py`（T27 新增） | 11 passed / 1 xfailed | 契约边界补充：major 空白 strip/超长/100 边界、**幂等覆盖语义（D-29 xfail）**、清空后重设、返回顺序=请求数组顺序、stats 数值口径（q/correct/accuracy/mastery/kp/streak）、零记录零值、plaza joined 真实状态（加入 true/未加入 false）、私有课不进广场、sort_order 排序、question_count 仅计 active |
 | `tests/test_m4_migration.py`（T27 新增） | 3 passed | 迁移链 0001→0005 离线 SQL 可生成（alembic upgrade head --sql）、0005 关键 DDL 断言、迁移文件元数据链 |
 
-**T27 新增 16 用例（14 passed + 2 xfailed→1 实 xfail）**；累计全量 500 passed / 3 skipped / 9 xfailed / 10 xpassed（1 failed 为 test_config 预存环境性，见 §21）。
+**T27 新增 15 用例（14 passed + 1 xfailed）**；累计全量 500 passed / 3 skipped / 9 xfailed / 10 xpassed（1 failed 为 test_config 预存环境性，见 §21）。
 
 ## 23. 执行结果（M4 实测）
 
@@ -572,8 +572,10 @@ PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m35_tts_api.py -v     
 
 ```bash
 cd backend
-PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m4_subjects_plaza.py tests/test_m4_plaza_acceptance.py tests/test_m4_migration.py -q
-→ 14 passed, 3 skipped, 14 passed, 1 xfailed, 3 passed
+PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m4_subjects_plaza.py -q                      # T25 交付
+→ 14 passed, 3 skipped
+PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m4_plaza_acceptance.py tests/test_m4_migration.py -q   # T27 新增
+→ 14 passed, 1 xfailed in 21.86s
 ```
 
 ### 23.2 后端 pytest 全量回归
