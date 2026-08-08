@@ -26,6 +26,7 @@ unpackage/
 # --- Database ---
 *.db
 *.sqlite3
+*.db-journal
 pgdata*/
 data/postgres/
 
