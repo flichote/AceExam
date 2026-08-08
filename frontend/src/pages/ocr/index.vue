@@ -50,6 +50,18 @@
         <text class="manual-arrow">›</text>
       </view>
     </view>
+
+    <!-- M5 题库共建入口 -->
+    <view class="section ugc-entry">
+      <view class="card ugc-entry-card" @click="goUgc">
+        <text class="ugc-entry-icon">🧩</text>
+        <view class="ugc-entry-texts">
+          <text class="ugc-entry-title">题库共建 · 我的投稿</text>
+          <text class="ugc-entry-desc">上传共享题，查看 AI 初审与审核状态</text>
+        </view>
+        <text class="ugc-entry-arrow">›</text>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -132,6 +144,11 @@ function goManual() {
   uni.navigateTo({
     url: `/pages/ocr/confirm?subjectId=${encodeURIComponent(ocrStore.subjectId)}&manual=1`,
   });
+}
+
+/** M5 题库共建入口（我的投稿 + 审核状态） */
+function goUgc() {
+  uni.navigateTo({ url: "/pages/ugc/index" });
 }
 </script>
 
@@ -291,5 +308,43 @@ function goManual() {
 .manual-arrow {
   font-size: 40rpx;
   color: $neutral-300;
+}
+
+/* M5 题库共建入口 */
+.ugc-entry {
+  padding-top: 0;
+}
+.ugc-entry-card {
+  display: flex;
+  align-items: center;
+  padding: 24rpx;
+  border: 3rpx dashed $primary-500;
+  box-shadow: none;
+}
+.ugc-entry-card:active {
+  background: $primary-100;
+}
+.ugc-entry-icon {
+  font-size: 40rpx;
+  margin-right: 16rpx;
+}
+.ugc-entry-texts {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.ugc-entry-title {
+  font-size: $font-body;
+  font-weight: 700;
+  color: $primary-600;
+}
+.ugc-entry-desc {
+  font-size: 22rpx;
+  color: $neutral-500;
+  margin-top: 2rpx;
+}
+.ugc-entry-arrow {
+  font-size: 36rpx;
+  color: $primary-500;
 }
 </style>

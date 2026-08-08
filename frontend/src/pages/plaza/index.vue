@@ -6,6 +6,43 @@
       <text class="intro-sub">公共课程任你选，加入后出现在首页「我的课程」</text>
     </view>
 
+    <!-- M5 搜索框：别名联想（GET /courses/aliases）→ 定位模板课 -->
+    <view class="search">
+      <view class="search-box">
+        <text class="search-icon">🔍</text>
+        <input
+          v-model="keyword"
+          class="search-input"
+          placeholder="搜别名：高数 / 英语 / 线代…"
+          placeholder-class="search-placeholder"
+          maxlength="50"
+          @input="onKeywordInput"
+          @focus="onKeywordInput"
+        />
+        <text v-if="keyword" class="search-clear" @click="clearKeyword">✕</text>
+      </view>
+
+      <!-- 别名联想下拉 -->
+      <view v-if="suggestions.length" class="search-suggest">
+        <view
+          v-for="s in suggestions"
+          :key="s.alias"
+          class="search-suggest-row"
+          @click="onPickAlias(s)"
+        >
+          <text class="search-suggest-alias">{{ s.alias }}</text>
+          <text class="search-suggest-arrow">→</text>
+          <text class="search-suggest-template">{{ s.template_name }}</text>
+        </view>
+      </view>
+
+      <!-- 当前筛选 -->
+      <view v-if="searchTarget" class="search-target">
+        <text class="search-target-text">筛选：{{ searchTarget.name }}</text>
+        <text class="search-target-clear" @click="clearSearchTarget">✕ 清除</text>
+      </view>
+    </view>
+
     <!-- 加载中 -->
     <template v-if="loading">
       <view class="wrap">
@@ -27,7 +64,7 @@
     <template v-else>
       <view class="wrap">
         <view
-          v-for="item in items"
+          v-for="item in visibleItems"
           :key="item.id"
           class="card plaza-card"
         >
@@ -61,8 +98,27 @@
           </view>
         </view>
 
-        <view v-if="!items.length" class="card empty-card">
+        <!-- 搜索无结果：模板课未上架 → 引导录入 -->
+        <view v-if="searchTarget && !visibleItems.length" class="card no-result">
+          <text class="no-result-title">「{{ searchTarget.name }}」暂未在广场上架</text>
+          <text class="no-result-desc">该模板课程题库可能尚未开放，你可以先录入校本课程，匹配后同样共享题库</text>
+          <view class="btn btn--primary no-result-btn" @click="goCourseEntry">
+            <text class="btn--primary-text">去录入校本课程</text>
+          </view>
+        </view>
+
+        <view v-if="!visibleItems.length && !searchTarget" class="card empty-card">
           <text class="empty-text">暂时没有可加入的公共课程</text>
+        </view>
+
+        <!-- 录入校本课程入口 -->
+        <view class="card entry-card" @click="goCourseEntry">
+          <text class="entry-icon">📥</text>
+          <view class="entry-texts">
+            <text class="entry-title">没有找到你的课程？录入校本课程</text>
+            <text class="entry-desc">输入学校课程名，AI 匹配模板，题库跨校共享</text>
+          </view>
+          <text class="entry-arrow">›</text>
         </view>
       </view>
     </template>
@@ -74,10 +130,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
-import type { PlazaSubject } from "@/types";
+import type { CourseAliasItem, PlazaSubject } from "@/types";
 import { fetchPlazaSubjects } from "@/api/subjects";
+import { fetchCourseAliases } from "@/api/courses";
 import { updateMeSubjects } from "@/api/me";
 import { getToken } from "@/utils/request";
 import LoadingSkeleton from "@/components/LoadingSkeleton.vue";
@@ -86,6 +143,14 @@ const items = ref<PlazaSubject[]>([]);
 const loading = ref(false);
 const error = ref("");
 const updatingId = ref("");
+
+const keyword = ref("");
+const suggestions = ref<CourseAliasItem[]>([]);
+/** 当前按模板课筛选（null = 全量） */
+const searchTarget = ref<{ code: string; name: string } | null>(null);
+
+let aliasTimer: ReturnType<typeof setTimeout> | undefined;
+let aliasSeq = 0;
 
 onShow(() => {
   load();
@@ -102,6 +167,59 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+/** 搜索联想：防抖 300ms 拉 GET /courses/aliases */
+function onKeywordInput() {
+  if (aliasTimer) clearTimeout(aliasTimer);
+  aliasTimer = setTimeout(async () => {
+    const q = keyword.value.trim();
+    const seq = ++aliasSeq;
+    if (!q) {
+      suggestions.value = [];
+      return;
+    }
+    try {
+      const list = await fetchCourseAliases(q, 8);
+      if (seq === aliasSeq) suggestions.value = list;
+    } catch {
+      if (seq === aliasSeq) suggestions.value = [];
+    }
+  }, 300);
+}
+
+/** 点选别名 → 按模板课筛选广场列表 */
+function onPickAlias(s: CourseAliasItem) {
+  if (aliasTimer) clearTimeout(aliasTimer);
+  aliasSeq++;
+  suggestions.value = [];
+  keyword.value = s.alias;
+  searchTarget.value = { code: s.template_code, name: s.template_name };
+}
+
+function clearKeyword() {
+  keyword.value = "";
+  suggestions.value = [];
+}
+
+function clearSearchTarget() {
+  searchTarget.value = null;
+  keyword.value = "";
+  suggestions.value = [];
+}
+
+/** 筛选后的广场列表 */
+const visibleItems = computed(() => {
+  if (!searchTarget.value) return items.value;
+  return items.value.filter(
+    (i) =>
+      i.code === searchTarget.value?.code ||
+      i.name === searchTarget.value?.name
+  );
+});
+
+function goCourseEntry() {
+  uni.navigateTo({ url: "/pages/course-entry/index" });
 }
 
 /** 加入/移出：本地翻转 joined → PUT /me/subjects 全量覆盖（§13.2 幂等） */
@@ -279,5 +397,153 @@ async function onToggle(item: PlazaSubject) {
 .page-foot-text {
   font-size: 22rpx;
   color: $neutral-300;
+}
+
+/* M5 搜索 */
+.search {
+  padding: 16rpx 32rpx 0;
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  border-radius: $radius-btn;
+  border: 2rpx solid $neutral-100;
+  padding: 14rpx 20rpx;
+}
+.search-icon {
+  font-size: 28rpx;
+  margin-right: 12rpx;
+  color: $neutral-300;
+}
+.search-input {
+  flex: 1;
+  font-size: $font-body;
+  color: $neutral-900;
+}
+.search-placeholder {
+  color: $neutral-300;
+}
+.search-clear {
+  font-size: 28rpx;
+  color: $neutral-300;
+  padding: 4rpx 8rpx;
+}
+.search-suggest {
+  background: #ffffff;
+  border-radius: $radius-btn;
+  box-shadow: $shadow-float;
+  margin-top: 8rpx;
+  overflow: hidden;
+}
+.search-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 20rpx 24rpx;
+  border-bottom: 2rpx solid $neutral-100;
+}
+.search-suggest-row:active {
+  background: $primary-100;
+}
+.search-suggest-alias {
+  font-size: $font-body;
+  color: $neutral-900;
+  font-weight: 600;
+  max-width: 240rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-suggest-arrow {
+  color: $neutral-300;
+  font-size: 22rpx;
+}
+.search-suggest-template {
+  flex: 1;
+  font-size: $font-body;
+  color: $primary-600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12rpx;
+  background: $primary-100;
+  border-radius: $radius-tag;
+  padding: 10rpx 18rpx;
+}
+.search-target-text {
+  font-size: 24rpx;
+  color: $primary-600;
+  font-weight: 600;
+}
+.search-target-clear {
+  font-size: 22rpx;
+  color: $neutral-500;
+}
+
+/* 搜索无结果 */
+.no-result {
+  padding: 40rpx 32rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 24rpx;
+}
+.no-result-title {
+  font-size: $font-body;
+  font-weight: 700;
+  color: $neutral-900;
+}
+.no-result-desc {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: $neutral-500;
+  text-align: center;
+  line-height: 1.5;
+}
+.no-result-btn {
+  margin-top: 20rpx;
+  padding: 12rpx 40rpx;
+}
+
+/* 录入校本课程入口 */
+.entry-card {
+  display: flex;
+  align-items: center;
+  padding: 24rpx;
+  margin-top: 8rpx;
+  border: 3rpx dashed $primary-500;
+  box-shadow: none;
+}
+.entry-card:active {
+  background: $primary-100;
+}
+.entry-icon {
+  font-size: 40rpx;
+  margin-right: 16rpx;
+}
+.entry-texts {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.entry-title {
+  font-size: $font-body;
+  font-weight: 700;
+  color: $primary-600;
+}
+.entry-desc {
+  font-size: 22rpx;
+  color: $neutral-500;
+  margin-top: 2rpx;
+}
+.entry-arrow {
+  font-size: 36rpx;
+  color: $primary-500;
 }
 </style>

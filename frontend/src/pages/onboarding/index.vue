@@ -78,6 +78,31 @@
       </view>
     </view>
 
+    <!-- M5 校本课程：手动录入 + AI 匹配模板（录入页返回后自动刷新） -->
+    <view class="section">
+      <view class="section-head">
+        <text class="section-title">校本课程</text>
+        <text class="section-sub">AI 匹配模板，跨校共享题库</text>
+      </view>
+
+      <!-- 已录入的校本实例（不在广场列表，保存时保留） -->
+      <view v-if="schoolCourses.length" class="card school-list">
+        <view v-for="c in schoolCourses" :key="c.subject.id" class="school-row">
+          <text class="school-name">{{ c.subject.name }}</text>
+          <text class="school-tag">校本</text>
+        </view>
+      </view>
+
+      <view class="card entry-card" @click="goCourseEntry">
+        <text class="entry-icon">📥</text>
+        <view class="entry-texts">
+          <text class="entry-title">录入校本课程</text>
+          <text class="entry-desc">输入学校课程名，自动匹配到模板课程</text>
+        </view>
+        <text class="entry-arrow">›</text>
+      </view>
+    </view>
+
     <!-- 底部操作 -->
     <view class="foot">
       <view
@@ -93,9 +118,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
-import { onLoad } from "@dcloudio/uni-app";
-import type { PlazaSubject } from "@/types";
+import { computed, ref } from "vue";
+import { onLoad, onShow } from "@dcloudio/uni-app";
+import type { PlazaSubject, UserSubjectItem } from "@/types";
 import { fetchPlazaSubjects } from "@/api/subjects";
 import { fetchMeSubjects, updateMeSubjects, updateProfile } from "@/api/me";
 import { useAuthStore } from "@/stores/auth";
@@ -112,6 +137,9 @@ const plazaLoading = ref(false);
 const plazaError = ref("");
 const saving = ref(false);
 
+/** 我的课程全量（GET /me/subjects）：用于识别校本实例 + 保存合并 */
+const myCourses = ref<UserSubjectItem[]>([]);
+
 onLoad(async () => {
   try {
     const info = uni.getSystemInfoSync();
@@ -124,6 +152,20 @@ onLoad(async () => {
   major.value = authStore.user?.major || "";
   await loadPlaza();
   await loadMySubjects();
+});
+
+// 从「录入校本课程」页返回时刷新已录入列表（校本实例 + 勾选状态）
+onShow(() => {
+  if (plazaItems.value.length || plazaError.value) {
+    loadPlaza();
+    loadMySubjects();
+  }
+});
+
+/** 校本实例：我的课程中不属于广场公共课的条目（保存时保留，避免被全量覆盖清掉） */
+const schoolCourses = computed(() => {
+  const plazaIds = new Set(plazaItems.value.map((p) => p.id));
+  return myCourses.value.filter((it) => !plazaIds.has(it.subject.id));
 });
 
 async function loadPlaza() {
@@ -143,6 +185,7 @@ async function loadPlaza() {
 async function loadMySubjects() {
   try {
     const res = await fetchMeSubjects();
+    myCourses.value = res.items;
     selectedIds.value = res.items.map((it) => it.subject.id);
   } catch {
     /* 未登录/失败静默 */
@@ -157,6 +200,11 @@ function onCheckboxChange(e: { detail: { value: string[] } }) {
   selectedIds.value = e.detail.value;
 }
 
+/** 去录入校本课程（M5：联想 + 匹配 + 手动建实例） */
+function goCourseEntry() {
+  uni.navigateTo({ url: "/pages/course-entry/index" });
+}
+
 /** 保存：PUT /me/profile（专业非空时）→ PUT /me/subjects（幂等覆盖） */
 async function onSave() {
   if (saving.value) return;
@@ -166,7 +214,10 @@ async function onSave() {
     if (trimmed) {
       await updateProfile(trimmed);
     }
-    await updateMeSubjects(selectedIds.value);
+    // 全量覆盖：勾选的广场课 ∪ 已录入的校本实例（防止 PUT /me/subjects 清掉手动录入课程）
+    const target = new Set(selectedIds.value);
+    schoolCourses.value.forEach((it) => target.add(it.subject.id));
+    await updateMeSubjects(Array.from(target));
     markOnboarded();
     uni.showToast({ title: "已保存 🎉", icon: "none" });
     setTimeout(() => {
@@ -330,6 +381,73 @@ function onSkip() {
 .error-btn {
   margin-top: 20rpx;
   padding: 12rpx 48rpx;
+}
+
+/* M5 校本课程 */
+.school-list {
+  padding: 8rpx 24rpx;
+  margin-bottom: 16rpx;
+}
+.school-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 0;
+  border-bottom: 2rpx solid $neutral-100;
+}
+.school-row:last-child {
+  border-bottom: none;
+}
+.school-name {
+  font-size: $font-body;
+  font-weight: 600;
+  color: $neutral-900;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.school-tag {
+  font-size: 20rpx;
+  color: $info-500;
+  background: rgba($info-500, 0.1);
+  border-radius: $radius-tag;
+  padding: 2rpx 10rpx;
+  flex-shrink: 0;
+}
+.entry-card {
+  display: flex;
+  align-items: center;
+  padding: 24rpx;
+  border: 3rpx dashed $primary-500;
+  box-shadow: none;
+}
+.entry-card:active {
+  background: $primary-100;
+}
+.entry-icon {
+  font-size: 40rpx;
+  margin-right: 16rpx;
+}
+.entry-texts {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.entry-title {
+  font-size: $font-body;
+  font-weight: 700;
+  color: $primary-600;
+}
+.entry-desc {
+  font-size: 22rpx;
+  color: $neutral-500;
+  margin-top: 2rpx;
+}
+.entry-arrow {
+  font-size: 36rpx;
+  color: $primary-500;
 }
 
 /* 底部 */

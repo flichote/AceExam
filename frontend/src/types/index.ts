@@ -610,3 +610,92 @@ export interface MeSubjectsResponse {
 export interface ProfileUpdate {
   major: string;
 }
+
+/* ===== M5 课程归一对齐 / 题库飞轮（docs/api.md §14）===== */
+
+/** GET /courses/aliases 条目（§14.1，录入联想种子/别名搜索） */
+export interface CourseAliasItem {
+  alias: string;
+  template_subject_id: string;
+  template_name: string;
+  template_code: string;
+  source: "seed" | "ai" | "manual";
+  is_verified: boolean;
+}
+
+/** POST /courses/match 候选（§14.2） */
+export interface CourseMatchCandidate {
+  template_subject_id: string;
+  name: string;
+  code: string;
+  /** 0~1 */
+  confidence: number;
+  reason: string;
+  source: "alias" | "ai" | "manual";
+}
+
+export interface CourseMatchResponse {
+  matched: boolean;
+  candidates: CourseMatchCandidate[];
+  strategy: "alias" | "ai" | "manual";
+}
+
+/** POST /me/courses 请求体（§14.3） */
+export interface CreateCoursePayload {
+  name: string;
+  school?: string;
+  /** 非空 = 映射到模板；null = 手动建校本实例 */
+  template_subject_id?: string | null;
+}
+
+/** POST /me/courses 响应（§14.3） */
+export interface CreateCourseResult {
+  user_subject: {
+    user_id: string;
+    subject_id: string;
+    template_subject_id: string | null;
+    created_at: string;
+  };
+  subject: UserSubjectBrief;
+  matched: boolean;
+}
+
+/** AI 初审结果（§14.4 / §14.5） */
+export interface UgcAiReview {
+  verdict: "pass" | "flag" | "unknown";
+  /** 0~1 */
+  confidence: number;
+  reasons: string[];
+}
+
+/** POST /ugc/upload 响应（§14.4，含 AI 初审） */
+export interface UgcUploadResult {
+  question_id: string;
+  status: "pending" | "active";
+  duplicated: boolean;
+  ai_review?: UgcAiReview | null;
+}
+
+/** GET /ugc/status 条目（§14.5） */
+export interface UgcStatusItem {
+  question_id: string;
+  subject_id: string;
+  subject_name: string;
+  knowledge_point_id: string;
+  knowledge_point_name: string;
+  type: QuestionType;
+  /** 题干（后端截断 50 字） */
+  content: string;
+  status: "pending" | "active" | "rejected";
+  reject_reason: string | null;
+  ai_review?: UgcAiReview | null;
+  submitted_at: string;
+  reviewed_at: string | null;
+}
+
+export interface UgcStatusResponse {
+  items: UgcStatusItem[];
+  page: number;
+  page_size: number;
+  total: number;
+}

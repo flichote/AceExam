@@ -109,6 +109,18 @@
 			"style": {
 				"navigationBarTitleText": "课程广场"
 			}
+		},
+		{
+			"path": "pages/course-entry/index",
+			"style": {
+				"navigationBarTitleText": "录入校本课程"
+			}
+		},
+		{
+			"path": "pages/ugc/index",
+			"style": {
+				"navigationBarTitleText": "题库共建"
+			}
 		}
 	],
 	"tabBar": {

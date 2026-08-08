@@ -151,6 +151,11 @@
             @next="practice.next"
           />
 
+          <!-- M5 报错纠错入口：题目有误 → 带到 UGC 投稿页修改重新提交 -->
+          <view class="report-link" @click="goReport">
+            <text class="report-link-text">题目有误？报错纠错 →</text>
+          </view>
+
           <!-- 连续正确提醒（knowledge_state.streak） -->
           <view v-if="practice.knowledgeState && practice.knowledgeState.streak >= 3" class="streak-tip">
             <text class="streak-tip-text">🔥 连续 3 次正确，「{{ practice.current.knowledgePoint }}」已掌握！</text>
@@ -269,6 +274,20 @@ function goAiExplain() {
 
 function goPlaza() {
   uni.navigateTo({ url: "/pages/plaza/index" });
+}
+
+/** M5 报错纠错：把当前题带到 UGC 投稿确认页（默认共享题 + 预填题干） */
+function goReport() {
+  const q = practice.current;
+  if (!q) return;
+  const params: string[] = [
+    "manual=1",
+    "ugc=1",
+    "report=1",
+    `subjectId=${encodeURIComponent(practice.subjectId)}`,
+    `content=${encodeURIComponent(q.stem)}`,
+  ];
+  uni.navigateTo({ url: `/pages/ocr/confirm?${params.join("&")}` });
 }
 </script>
 
@@ -422,6 +441,18 @@ function goPlaza() {
 .streak-tip-text {
   font-size: 24rpx;
   color: $success-500;
+}
+
+/* M5 报错纠错入口 */
+.report-link {
+  margin-top: 16rpx;
+  display: inline-flex;
+  padding: 8rpx 0;
+}
+.report-link-text {
+  font-size: 24rpx;
+  color: $neutral-500;
+  text-decoration: underline;
 }
 
 /* 解析卡片 */

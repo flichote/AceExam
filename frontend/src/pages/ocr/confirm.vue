@@ -59,7 +59,7 @@
         </text>
       </view>
 
-      <!-- M3.5 UGC：投稿共享题库（进审核流） -->
+      <!-- M3.5/M5 UGC：投稿共享题库（进审核流 + AI 初审） -->
       <view class="card confirm-opt">
         <view class="confirm-opt-row" @click="shareToUgc = !shareToUgc">
           <view class="checkbox" :class="{ 'checkbox--on': shareToUgc }">
@@ -67,12 +67,17 @@
           </view>
           <view class="ugc-texts">
             <text class="confirm-opt-text">提交为共享题（投稿共建公共题库）</text>
-            <text class="ugc-hint">审核通过后其他同学也能练到这道题</text>
+            <text class="ugc-hint">AI 初审后进入审核队列，通过后其他同学也能练到这道题</text>
           </view>
         </view>
         <view v-if="ugcSubmitted" class="ugc-status">
-          <text class="ugc-status-text">✅ 已提交，等待审核</text>
+          <text class="ugc-status-text">✅ 已提交，AI 初审中…</text>
         </view>
+      </view>
+
+      <!-- M5 纠错投稿提示（从题目报错纠错进入时显示） -->
+      <view v-if="report" class="card report-banner">
+        <text class="report-banner-text">⚠️ 纠错投稿：请在下方修改题目内容（题干/选项/答案）后提交，AI 会复核你的修正</text>
       </view>
 
       <!-- 入库按钮 -->
@@ -96,7 +101,7 @@ import { useOcrStore } from "@/stores/ocr";
 import { useSubjectStore } from "@/stores/subject";
 import { fetchKnowledgePoints } from "@/api/subjects";
 import { confirmOcrQuestion } from "@/api/ocr";
-import { submitUgcQuestion } from "@/api/ugc";
+import { submitUgcUpload } from "@/api/ugc";
 import type { OcrStructured, SuggestedKp } from "@/types";
 import OcrResultEditor from "@/components/OcrResultEditor.vue";
 
@@ -108,6 +113,10 @@ const saving = ref(false);
 const uploadId = ref("");
 const subjectId = ref("");
 const manual = ref(false);
+/** M5：ugc=1 进入时默认勾选「提交为共享题」 */
+const ugc = ref(false);
+/** M5：report=1 纠错投稿（从题目报错纠错进入） */
+const report = ref(false);
 
 const structured = ref<OcrStructured>({
   type: "single",
@@ -121,7 +130,7 @@ const rawText = ref("");
 const suggestedKps = ref<SuggestedKp[]>([]);
 const selectedKpId = ref("");
 const confirmAnswer = ref(true);
-/** M3.5 UGC：勾选后提交为共享题（走审核流，POST /questions/ugc） */
+/** M3.5/M5 UGC：勾选后提交为共享题（走审核流，POST /ugc/upload 内置 AI 初审） */
 const shareToUgc = ref(false);
 /** 投稿后的待审核状态提示 */
 const ugcSubmitted = ref(false);
@@ -133,6 +142,9 @@ onLoad(async (options) => {
   subjectId.value = (options?.subjectId as string) || "";
   uploadId.value = (options?.uploadId as string) || "";
   manual.value = (options?.manual as string) === "1";
+  ugc.value = (options?.ugc as string) === "1";
+  report.value = (options?.report as string) === "1";
+  if (ugc.value) shareToUgc.value = true;
 
   if (!subjectId.value) {
     subjectId.value = ocrStore.subjectId || subjectStore.subjects[0]?.id || "";
@@ -152,8 +164,11 @@ onLoad(async (options) => {
       selectedKpId.value = suggestedKps.value[0].id;
     }
   } else {
-    // 手动录入：空题目骨架
+    // 手动录入：空题目骨架（M5 报错纠错可预填题干）
     structured.value = { type: "single", content: "", options: [{ key: "A", text: "" }], answer: "", analysis: "" };
+    if (options?.content) {
+      structured.value.content = decodeURIComponent(options.content as string);
+    }
   }
   loading.value = false;
 });
@@ -205,8 +220,8 @@ async function save() {
     const resolvedUploadId = uploadId.value || `manual-${Date.now()}`;
 
     if (shareToUgc.value) {
-      // M3.5 UGC 投稿：POST /questions/ugc（进审核流 status=pending）
-      const res = await submitUgcQuestion({
+      // M3.5/M5 UGC 投稿：POST /ugc/upload（内置 AI 初审，进审核流 status=pending）
+      const res = await submitUgcUpload({
         subject_id: subjectId.value,
         knowledge_point_id: selectedKpId.value,
         type: structured.value.type,
@@ -215,12 +230,16 @@ async function save() {
         answer: structured.value.answer,
         analysis: structured.value.analysis || undefined,
         ocr_upload_id: manual.value ? null : resolvedUploadId,
+        skip_ai_review: false,
       });
       ugcSubmitted.value = true;
-      uni.showToast({
-        title: res.duplicated ? "题库已有该题（未重复投稿）" : "投稿成功，等待审核 🕐",
-        icon: "none",
-      });
+      if (res.duplicated) {
+        uni.showToast({ title: "题库已有该题（未重复投稿）", icon: "none" });
+      } else if (res.ai_review?.verdict === "flag") {
+        uni.showToast({ title: "AI 初审存疑，已转人工复核 ⚠️", icon: "none" });
+      } else {
+        uni.showToast({ title: "投稿成功，AI 初审中 🕐", icon: "none" });
+      }
       setTimeout(() => uni.navigateBack(), 900);
       return;
     }
@@ -406,6 +425,19 @@ async function save() {
   font-size: 22rpx;
   color: $success-500;
   font-weight: 600;
+}
+
+/* M5 纠错投稿提示 */
+.report-banner {
+  margin: 0 32rpx 20rpx;
+  padding: 20rpx 24rpx;
+  border: 2rpx solid rgba($warning-500, 0.4);
+  background: rgba($warning-500, 0.08);
+}
+.report-banner-text {
+  font-size: 22rpx;
+  color: $warning-500;
+  line-height: 1.6;
 }
 
 /* 入库按钮 */

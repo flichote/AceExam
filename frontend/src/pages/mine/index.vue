@@ -156,6 +156,7 @@ const menus = [
   { icon: "🗓️", label: "备考计划", action: "plan" },
   { icon: "📕", label: "错题本", action: "wrong" },
   { icon: "🏆", label: "排行榜", action: "leaderboard" },
+  { icon: "🧩", label: "题库共建", action: "ugc" },
   { icon: "🌳", label: "知识点图谱", action: "graph" },
   { icon: "🖼️", label: "成绩单海报", action: "share" },
   { icon: "⚙️", label: "设置", action: "settings" },
@@ -177,6 +178,10 @@ function onMenu(item: { label: string; action: string }) {
   }
   if (item.action === "leaderboard") {
     uni.navigateTo({ url: "/pages/leaderboard/index" });
+    return;
+  }
+  if (item.action === "ugc") {
+    uni.navigateTo({ url: "/pages/ugc/index" });
     return;
   }
   if (item.action === "graph") {
