@@ -61,6 +61,7 @@ _PgUUID.bind_processor = _sqlite_uuid_bind_processor
 from app.db.base import Base  # noqa: E402
 from app.db.models import (  # noqa: E402,F401
     Class,
+    CourseAlias,
     KnowledgePoint,
     Question,
     Subject,

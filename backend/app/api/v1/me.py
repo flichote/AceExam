@@ -1,4 +1,5 @@
-"""Me router — 班级 + 分享卡 (M3.5 §12.6~§12.8)."""
+"""Me router — 班级 + 分享卡 + 选课 (M3.5 §12.6~§12.8 + M4 §13 + M5 §14.3~§14.4)."""
+import hashlib
 import secrets
 import string
 import uuid
@@ -37,6 +38,13 @@ from app.schemas.me import (
     SubjectStats,
     UserSubjectItem,
     UserSubjectListResponse,
+)
+from app.schemas.courses import (
+    CourseCreateRequest,
+    UserCourseListResponse,
+    UserCourseResponse,
+    UserCourseSubjectBrief,
+    UserCourseUserSubject,
 )
 from app.services.streak import compute_streak
 
@@ -513,3 +521,204 @@ async def _build_user_subjects_response(db: AsyncSession, user: User) -> UserSub
         )
 
     return UserSubjectListResponse(items=items, total=len(items))
+
+
+# ── M5: 校本课程录入 / 列表 ──
+
+
+@router.post("/courses", response_model=UserCourseResponse)
+async def add_my_course(
+    body: "CourseCreateRequest",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """POST /me/courses：录入校本课程实例（api.md §14.3）。"""
+
+    # ── template_subject_id 非空：映射到模板 ──
+    if body.template_subject_id:
+        try:
+            tid = uuid.UUID(body.template_subject_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid template_subject_id")
+
+        # 验证模板课程存在且活跃
+        tmpl_result = await db.execute(
+            select(Subject).where(Subject.id == tid, Subject.is_active == True)
+        )
+        template_subject = tmpl_result.scalar_one_or_none()
+        if not template_subject:
+            raise HTTPException(status_code=404, detail="Template subject not found or inactive")
+
+        # 检查是否已有同名 level='school' 行
+        existing_school = await db.execute(
+            select(Subject).where(
+                Subject.name == body.name,
+                Subject.level == "school",
+                Subject.is_active == True,
+            )
+        )
+        school_subj = existing_school.scalar_one_or_none()
+
+        if school_subj:
+            # 复用已有校本实例行
+            subject_id = school_subj.id
+        else:
+            # 直接挂模板课程行
+            subject_id = tid
+
+        # 幂等检查
+        existing_us = await db.execute(
+            select(UserSubject).where(
+                UserSubject.user_id == user.id,
+                UserSubject.subject_id == subject_id,
+            )
+        )
+        if existing_us.scalar_one_or_none():
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "ALREADY_EXISTS",
+                    "message": "Course already in your list",
+                    "detail": {"subject_id": str(subject_id)},
+                },
+            )
+
+        us = UserSubject(
+            user_id=user.id,
+            subject_id=subject_id,
+            template_subject_id=tid,
+        )
+        db.add(us)
+        await db.commit()
+        await db.refresh(us)
+
+        target_subj = school_subj if school_subj else template_subject
+        return UserCourseResponse(
+            user_subject=UserCourseUserSubject(
+                user_id=str(us.user_id),
+                subject_id=str(us.subject_id),
+                template_subject_id=str(us.template_subject_id) if us.template_subject_id else None,
+                created_at=us.created_at,
+            ),
+            subject=UserCourseSubjectBrief(
+                id=str(target_subj.id),
+                code=target_subj.code,
+                name=target_subj.name,
+                description=target_subj.description,
+                level=target_subj.level,
+                is_active=target_subj.is_active,
+                is_public=target_subj.is_public,
+            ),
+            matched=True,
+        )
+
+    # ── template_subject_id 为空：手动建实例 ──
+    # 检查是否已有同名 school 实例
+    existing_school = await db.execute(
+        select(Subject).where(
+            Subject.name == body.name,
+            Subject.level == "school",
+            Subject.is_active == True,
+        )
+    )
+    school_subj = existing_school.scalar_one_or_none()
+
+    if not school_subj:
+        # 新建 level='school' 行
+        code_hash = hashlib.sha256(body.name.encode()).hexdigest()[:8]
+        school_subj = Subject(
+            code=f"school_{code_hash}",
+            name=body.name,
+            level="school",
+            is_active=True,
+            is_public=False,
+        )
+        db.add(school_subj)
+        await db.flush()
+
+    # 幂等检查
+    existing_us = await db.execute(
+        select(UserSubject).where(
+            UserSubject.user_id == user.id,
+            UserSubject.subject_id == school_subj.id,
+        )
+    )
+    if existing_us.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ALREADY_EXISTS",
+                "message": "Course already in your list",
+                "detail": {"subject_id": str(school_subj.id)},
+            },
+        )
+
+    us = UserSubject(
+        user_id=user.id,
+        subject_id=school_subj.id,
+        template_subject_id=None,
+    )
+    db.add(us)
+    await db.commit()
+    await db.refresh(us)
+
+    return UserCourseResponse(
+        user_subject=UserCourseUserSubject(
+            user_id=str(us.user_id),
+            subject_id=str(us.subject_id),
+            template_subject_id=None,
+            created_at=us.created_at,
+        ),
+        subject=UserCourseSubjectBrief(
+            id=str(school_subj.id),
+            code=school_subj.code,
+            name=school_subj.name,
+            description=school_subj.description,
+            level=school_subj.level,
+            is_active=school_subj.is_active,
+            is_public=school_subj.is_public,
+        ),
+        matched=False,
+    )
+
+
+@router.get("/courses", response_model=UserCourseListResponse)
+async def get_my_courses(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """GET /me/courses：我的课程实例列表（含 template 映射关系，api.md §14.4）。"""
+
+    us_result = await db.execute(
+        select(UserSubject, Subject)
+        .join(Subject, UserSubject.subject_id == Subject.id)
+        .where(UserSubject.user_id == user.id)
+        .order_by(UserSubject.created_at.asc())
+    )
+    rows = us_result.all()
+
+    items: list[UserCourseResponse] = []
+    for us_row, subj in rows:
+        # 如果有 template_subject_id，获取模板信息（但 subject 可能就是模板本身）
+        items.append(
+            UserCourseResponse(
+                user_subject=UserCourseUserSubject(
+                    user_id=str(us_row.user_id),
+                    subject_id=str(us_row.subject_id),
+                    template_subject_id=str(us_row.template_subject_id) if us_row.template_subject_id else None,
+                    created_at=us_row.created_at,
+                ),
+                subject=UserCourseSubjectBrief(
+                    id=str(subj.id),
+                    code=subj.code,
+                    name=subj.name,
+                    description=subj.description,
+                    level=subj.level,
+                    is_active=subj.is_active,
+                    is_public=subj.is_public,
+                ),
+                matched=us_row.template_subject_id is not None,
+            )
+        )
+
+    return UserCourseListResponse(items=items, total=len(items))
