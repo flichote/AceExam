@@ -272,9 +272,10 @@ async def submit_report(
                 break
 
     # --- LLM layer: generate summary and suggestions (mock for now) ---
+    accuracy = correct_count / total_count if total_count else 0.0
     summary_text = (
         f"Overall: {correct_count}/{total_count} correct. "
-        f"{'Strong performance' if correct_count/total_count >= 0.7 else 'Needs improvement'}"
+        f"{'Strong performance' if accuracy >= 0.7 else 'Needs improvement'}"
     )
     suggested_next_steps = [
         "Complete today's plan tasks for weak points",
