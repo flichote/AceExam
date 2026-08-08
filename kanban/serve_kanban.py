@@ -49,13 +49,32 @@ def load_board():
     tasks = []
     for r in rows:
         cur.execute(
-            "SELECT body, created_at FROM task_comments WHERE task_id=? ORDER BY created_at DESC LIMIT 2",
+            "SELECT body, created_at, author FROM task_comments WHERE task_id=? ORDER BY created_at DESC LIMIT 4",
             (r["id"],),
         )
-        comments = [{"text": c[0][:180], "ts": fmt_ts(c[1])} for c in cur.fetchall()]
+        comments = [{"text": c[0][:200], "ts": fmt_ts(c[1]), "author": c[2]} for c in cur.fetchall()]
+        # 完成人：交付评论的 author（通常是执行角色）；fallback 到 assignee
+        done_by = None
+        for c in comments:
+            if c["author"] not in (None, "", "default") and ("交付" in c["text"] or "完成" in c["text"] or "✅" in c["text"]):
+                done_by = c["author"]
+                break
+        if done_by is None:
+            done_by = r["assignee"]
+        # 从评论提取提交 hash：优先 `` `abc1234` `` 完整包裹；部分评论只有开头反引号，
+        # fallback 宽松匹配（[0-9a-f]{7,} 后随空格/结束），统一截断前 7 位显示。
+        import re
+        commit_hash = None
+        for c in comments:
+            m = re.search(r"`([0-9a-f]{7,})`", c["text"]) or re.search(r"([0-9a-f]{7,})[\s`]", c["text"])
+            if m:
+                commit_hash = m.group(1)[:7]
+                break
         tasks.append({
             "id": r["id"], "title": r["title"],
             "assignee": r["assignee"], "role": ROLE_NAMES.get(r["assignee"], r["assignee"]),
+            "done_by": done_by, "done_by_role": ROLE_NAMES.get(done_by, done_by),
+            "commit": commit_hash,
             "status": r["status"], "created": fmt_ts(r["created_at"]),
             "started": fmt_ts(r["started_at"]), "completed": fmt_ts(r["completed_at"]),
             "err": (r["last_failure_error"] or "")[:120], "pid": r["worker_pid"],
@@ -92,6 +111,7 @@ PAGE = """<!DOCTYPE html>
   .card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
   .badge { font-size: 11px; padding: 1px 8px; border-radius: 99px; color: #fff; font-weight: 600; }
   .role { font-size: 11px; background: #374151; padding: 1px 8px; border-radius: 99px; }
+  .doneby { font-size: 11px; background: #065F4633; color: #6EE7B7; border: 1px solid #065F46; padding: 1px 8px; border-radius: 99px; display: inline-block; margin: 2px 0 4px; }
   .tid { font-size: 10px; color: #6B7280; margin-left: auto; }
   .title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
   .meta { font-size: 10px; color: #9CA3AF; margin-bottom: 4px; }
@@ -116,12 +136,15 @@ function esc(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");}
 function card(t){
   const [sym,color] = STATUS[t.status]||["?","#999"];
   const err = t.err ? `<div class="err">⚠ ${esc(t.err)}</div>` : "";
-  const cmts = (t.comments||[]).map(c=>`<div class="cmt"><b>${esc(c.ts)}</b> ${esc(c.text)}</div>`).join("") || `<div class="cmt muted">（无评论）</div>`;
+  const cmts = (t.comments||[]).map(c=>`<div class="cmt"><b>${esc(c.ts)}</b> ${esc(c.author||"")} ${esc(c.text)}</div>`).join("") || `<div class="cmt muted">（无评论）</div>`;
+  const doneBadge = (t.status==="done" && t.done_by)
+    ? `<span class="doneby" title="完成人：${esc(t.done_by)}">👤 ${esc(t.done_by_role||t.done_by)}${t.commit?` · ${t.commit}`:""}</span>` : "";
   return `<div class="card ${t.status}">
     <div class="card-head"><span class="badge" style="background:${color}">${sym} ${t.status}</span>
     <span class="role">${esc(t.role)}</span><span class="tid">${t.id}</span></div>
     <div class="title">${esc(t.title)}</div>
     <div class="meta">创建 ${t.created} · 开始 ${t.started} · 完成 ${t.completed}${t.pid?` · pid ${t.pid}`:""}</div>
+    ${doneBadge}
     ${err}<div class="comments">${cmts}</div></div>`;
 }
 async function refresh(){
