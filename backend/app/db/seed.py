@@ -1,4 +1,4 @@
-"""AceExam M1/M2/M3 种子数据脚本（ep-db 交付，纯 SQLAlchemy，不依赖 FastAPI）。
+"""AceExam M1~M5 种子数据脚本（ep-db 交付，纯 SQLAlchemy，不依赖 FastAPI）。
 
 用法（backend/ 目录下）：
     DATABASE_URL=postgresql+psycopg://aceexam:aceexam@localhost:5432/aceexam \\
@@ -11,6 +11,8 @@
   - questions：每科 ≥30 题，含 answer + analysis，可直接刷
   - document_chunks（M2 补充）：高数教材示例分块语料（source='textbook'，
     embedding 置空由后台 embedder 回填），供 RAG 讲解/dev 检索使用
+  - M5（§12）：公共课 level='public' 回填 + course_aliases 种子（同课多名归一，
+    source='seed' + is_verified=true，架构 §14.5）
   - M3 演示数据（§9.2）：3 个演示用户（demo_student1 会员·考前 7 天·5 天连胜 /
     demo_student2 会员·14 天连胜·高正确率 / demo_free 免费·低活跃·无计划）+
     备考计划 + 近 14 天 study_sessions 打卡/做题记录 + user_knowledge_states 样本 +
@@ -68,6 +70,7 @@ except ZoneInfoNotFoundError:
 MATH_GAOSHU = {
     "code": "math_gaoshu",
     "is_public": True,
+    "level": "public",
     "name": "高等数学",
     "description": "高等数学（同济版）公共课：极限、导数、积分三大主线，期末通关门面科目。",
     "doc_source": "高等数学（同济第七版）",
@@ -395,6 +398,7 @@ MATH_GAOSHU = {
 ENGLISH = {
     "code": "eng_college",
     "is_public": True,
+    "level": "public",
     "name": "大学英语",
     "description": "大学英语公共课：词汇、语法、阅读、写作四大模块，四六级刚需。",
     "config": {
@@ -656,6 +660,7 @@ LINEAR_ALGEBRA = {
     "name": "线性代数",
     "description": "线性代数公共课：矩阵、向量空间、线性变换、特征值与二次型。",
     "is_public": True,
+    "level": "public",
     "config": {
         "prompt_templates": {
             "explain": "你是线性代数助教，请分步讲解，公式用 LaTeX。",
@@ -700,6 +705,7 @@ PROBABILITY = {
     "name": "概率论与数理统计",
     "description": "概率论公共课：随机事件、分布、期望、统计推断。",
     "is_public": True,
+    "level": "public",
     "config": {
         "prompt_templates": {
             "explain": "你是概率论助教，请分步讲解，公式用 LaTeX。",
@@ -743,6 +749,7 @@ COLLEGE_PHYSICS = {
     "name": "大学物理",
     "description": "大学物理公共课：力学、电磁学、热学、光学、近代物理基础。",
     "is_public": True,
+    "level": "public",
     "config": {
         "prompt_templates": {
             "explain": "你是大学物理助教，请分步讲解，公式用 LaTeX。",
@@ -781,6 +788,69 @@ COLLEGE_PHYSICS = {
 }
 
 SUBJECTS = [MATH_GAOSHU, ENGLISH, LINEAR_ALGEBRA, PROBABILITY, COLLEGE_PHYSICS]
+
+# M5 课程归一对齐：course_aliases 种子（docs/database.md §12 / architecture §14.2、§14.5）
+# 结构：template_code -> [alias, ...]；source='seed' 为人工校验种子，is_verified=True（D20 直接采用）
+COURSE_ALIASES_SEED: dict[str, list[str]] = {
+    "math_gaoshu": [
+        "高等数学A",
+        "高数A",
+        "高数上",
+        "高等数学（上）",
+        "高数",
+    ],
+    "eng_college": [
+        "大学英语",
+        "英语",
+        "大学英语综合",
+        "英语一",
+        "英语二",
+    ],
+    "math_linear_algebra": [
+        "线性代数A",
+        "线代",
+        "线性代数（上）",
+    ],
+    "math_probability": [
+        "概率论",
+        "概率论与数理统计A",
+        "概率统计",
+    ],
+    "phy_college": [
+        "大学物理A",
+        "物理A",
+        "大学物理（上）",
+    ],
+}
+
+
+def _seed_course_aliases(session: Session, subject_by_code: dict[str, Subject]) -> None:
+    """M5 课程归一对齐种子：公共课别名 → 模板课程（docs/database.md §12 / architecture §14.5）。
+
+    source='seed' + is_verified=True（人工校验种子，D20 直接采用）。
+    幂等：alias 已存在则跳过（配合主流程"已存在科目则跳过"；--reset 时表已清空全部重建）。
+    """
+    existing = set(session.scalars(select(models.CourseAlias.alias)).all())
+    added = 0
+    for code, aliases in COURSE_ALIASES_SEED.items():
+        subject = subject_by_code.get(code)
+        if subject is None:
+            print(f"[seed] 警告：course_aliases 种子引用了未知科目 code={code}，跳过")
+            continue
+        for alias in aliases:
+            if alias in existing:
+                continue
+            session.add(
+                models.CourseAlias(
+                    alias=alias,
+                    template_subject_id=subject.id,
+                    source="seed",
+                    is_verified=True,
+                )
+            )
+            added += 1
+    if added:
+        print(f"[seed] M5 course_aliases 种子：新增 {added} 条别名")
 
 
 def _seed_m3_demo(session: Session) -> None:
@@ -1028,11 +1098,13 @@ def seed(database_url: str, reset: bool = False) -> None:
                 models.StudySession.__tablename__,
                 models.Plan.__tablename__,
                 models.UserKnowledgeState.__tablename__,
+                models.UserSubject.__tablename__,
                 models.WrongAnswer.__tablename__,
                 models.DocumentChunk.__tablename__,
                 models.QuestionEmbedding.__tablename__,
                 models.Question.__tablename__,
                 models.KnowledgePoint.__tablename__,
+                models.CourseAlias.__tablename__,
                 models.Subject.__tablename__,
                 models.User.__tablename__,
             ]
@@ -1049,6 +1121,7 @@ def seed(database_url: str, reset: bool = False) -> None:
         total_kp = 0
         total_q = 0
         total_chunks = 0
+        subject_by_code: dict[str, Subject] = {}
         for subject_spec in SUBJECTS:
             subject = Subject(
                 code=subject_spec["code"],
@@ -1057,10 +1130,12 @@ def seed(database_url: str, reset: bool = False) -> None:
                 config=subject_spec["config"],
                 is_active=True,
                 is_public=subject_spec.get("is_public", False),
+                level=subject_spec.get("level", "public"),
                 sort_order=0,
             )
             session.add(subject)
             session.flush()  # 拿到 subject.id
+            subject_by_code[subject.code] = subject
 
             kp_map: dict[str, KnowledgePoint] = {}
             for chapter_order, chapter in enumerate(subject_spec["chapters"], start=1):
@@ -1131,13 +1206,16 @@ def seed(database_url: str, reset: bool = False) -> None:
                 )
                 total_chunks += 1
 
+        # M5：course_aliases 种子（同课多名归一，source='seed' + is_verified=true，架构 §14.5）
+        _seed_course_aliases(session, subject_by_code)
+
         # M3：演示数据（演示用户/计划/打卡/做题记录/知识点状态/突击会话，docs/database.md §9.2）
         # 先 flush 让 questions 拿到 id，演示数据需要引用真实题目/知识点
         session.flush()
         _seed_m3_demo(session)
 
         session.commit()
-        print(f"[seed] 完成：2 科目 / {total_kp} 知识点 / {total_q} 题 / {total_chunks} 教材分块")
+        print(f"[seed] 完成：{len(SUBJECTS)} 科目 / {total_kp} 知识点 / {total_q} 题 / {total_chunks} 教材分块")
         print(f"[seed] 科目：{', '.join(s['code'] + '(' + s['name'] + ')' for s in SUBJECTS)}")
 
 

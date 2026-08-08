@@ -1,10 +1,11 @@
-# AceExam 数据库设计（M1 基线 + M2/M3 增量）
+# AceExam 数据库设计（M1 基线 + M2/M3 增量 + M5 课程归一对齐）
 
-> **状态**：M3 增量 v1.2（2026-08-08）｜**作者**：ep-db
-> **定位**：表结构事实来源。需求见 [PRD](./PRD.md)；系统设计见 [architecture](./architecture.md)（subject 维度贯穿 / RAG 管线 / LLM 分级 / M2 五件套 + M3 图谱/突击/看板/排行/预警）；知识点状态机见 [flows](./design/flows.md)。
+> **状态**：M5 增量 v1.3（2026-08-08）｜**作者**：ep-db
+> **定位**：表结构事实来源。需求见 [PRD](./PRD.md)；系统设计见 [architecture](./architecture.md)（subject 维度贯穿 / RAG 管线 / LLM 分级 / M2 五件套 + M3 图谱/突击/看板/排行/预警 + M5 课程归一对齐）；知识点状态机见 [flows](./design/flows.md)。
 > **评审**：本文件与迁移脚本由 ep-arch 评审后锁定；任何表结构变更必须走 Alembic 迁移 + 同步更新本文档，禁止手改线上库。
 > **M2 增量说明**：M1 基线（§1~§7）保持不动；M2 表增量（`user_knowledge_states.streak` / `study_sessions.checked_in_at` / `ocr_uploads` / `diagnosis_reports` / `textbook_uploads` / `document_chunks.source` 取值扩展）见 §8，由迁移 `0002_m2_diagnosis_checkin_ocr` 落地。
 > **M3 增量说明**：M2 §8 保持不动；M3 表增量（唯一新表 `sprint_sessions`；打卡连胜/排行榜/挂科预警/高频考点识别确认无新表）见 §9，由迁移 `0003_m3_sprint` 落地。
+> **M5 增量说明**：M3 §9 保持不动；M5 表增量（新表 `course_aliases` 同课多名归一；`subjects.level` 课程分层；`user_subjects.template_subject_id` 校本实例→模板映射）见 §12，由迁移 `0006_course_alias_level` 落地。
 
 ---
 
@@ -52,6 +53,7 @@ users 1 ──── n chat_sessions / token_usage
 | `diagnosis_reports`（M2） | 薄弱诊断报告（自测题组/作答/薄弱 Top5 快照） | diagnose |
 | `textbook_uploads`（M2） | 教材上传→切块→embed 状态跟踪 | rag / textbooks |
 | `sprint_sessions`（M3） | 考前突击会话（激活时间/题单快照/高频考点快照/完成统计） | sprint |
+| `course_aliases`（M5） | 同课多名归一缓存与飞轮（alias → 模板课程） | courses |
 
 ---
 
@@ -83,12 +85,13 @@ users 1 ──── n chat_sessions / token_usage
 | name | VARCHAR(100) | NOT NULL | 展示名：高等数学 / 大学英语 |
 | description | TEXT | NULL | |
 | config | JSONB | NOT NULL, DEFAULT '{}' | 科目模板配置（ADR-0001，见 §3.2） |
+| level | VARCHAR(20) | NOT NULL, DEFAULT 'public', CHECK | **M5 新增**：课程分层 `public` 公共课 / `major` 专业基础课 / `school` 校本特色课（架构 §14.1） |
 | is_active | BOOLEAN | NOT NULL, DEFAULT true | 是否上架 |
 | sort_order | INT | NOT NULL, DEFAULT 0 | 排序 |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
 | updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
 
-索引：`uq_subjects_code`（UNIQUE code）。
+索引：`uq_subjects_code`（UNIQUE code）；`ix_subjects_level`（(level, is_active)，M5 分层列表/广场过滤）。
 
 ### 2.3 knowledge_points —— 知识点图谱（树）
 
@@ -382,6 +385,25 @@ users 1 ──── n chat_sessions / token_usage
 
 > 设计说明（架构 §11.2 / §11.7-1）：突击模式为会员功能；同一时刻每用户每科目至多一个 `active`（服务层先查后建 + 幂等，**不建部分唯一索引，简单为先**——用户可有多个 completed/expired 历史会话，故不能对 (user_id, subject_id, status) 加唯一约束）。
 
+### 2.18 course_aliases —— 课程别名归一表（M5 新增）
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| id | UUID | PK, gen_random_uuid() | |
+| alias | VARCHAR(100) | NOT NULL, UNIQUE | 归一化课程名（去空格/括号/学期/教材版本噪声），如"高等数学A" / "高数上" / "高数" |
+| template_subject_id | UUID | NOT NULL, FK → subjects.id | 映射到的模板课程（题目挂载点） |
+| source | VARCHAR(20) | NOT NULL, DEFAULT 'seed', CHECK | `seed` 种子 / `ai` AI 匹配沉淀 / `manual` 人工录入（架构 §14.2 D20） |
+| is_verified | BOOLEAN | NOT NULL, DEFAULT false | 是否人工/高分确认；false 仅作 AI 匹配候选，不直接采用 |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
+
+约束/索引：
+- `uq_course_aliases_alias`：UNIQUE (alias)（同课多名→同一模板；不同 alias 可指向同一模板，多对一）
+- `ix_course_aliases_template`：(template_subject_id)（按模板查别名）
+- `ck_course_aliases_source`：`source IN ('seed','ai','manual')`
+
+> 设计说明（架构 §14.2 / D20）：别名表作为匹配缓存与飞轮——录入联想/匹配时先精确命中别名（置信度 1.0），未命中再走 AI 语义匹配（省 AI 调用、越用越准）。写入时机：①种子（公共课别名，source='seed'）；②AI 匹配命中沉淀（source='ai'，幂等 upsert）；③匹配失败用户手动确认模板（source='manual' + is_verified=true）。
+
 ---
 
 ## 3. 枚举 / 取值清单
@@ -451,6 +473,8 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 | diagnosis_reports.status（M2） | `in_progress` / `completed` | `status IN ('in_progress','completed')` |
 | textbook_uploads.status（M2） | `processing` / `ready` / `failed` | `status IN ('processing','ready','failed')` |
 | sprint_sessions.status（M3） | `active` / `completed` / `expired` | `status IN ('active','completed','expired')` |
+| subjects.level（M5） | `public` 公共课 / `major` 专业基础课 / `school` 校本特色课 | `level IN ('public','major','school')` |
+| course_aliases.source（M5） | `seed` / `ai` / `manual` | `source IN ('seed','ai','manual')` |
 | document_chunks.source（M2 取值扩展） | 内置教材名 / `user_upload` | VARCHAR 无 CHECK，天然支持 |
 
 ---
@@ -486,6 +510,9 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 | `ix_diag_user_created`（M2） | diagnosis_reports | (user_id, created_at) | 诊断报告列表 |
 | `ix_tb_user_status`（M2） | textbook_uploads | (user_id, status) | 教材上传列表 |
 | `ix_sprint_user_subject_status`（M3） | sprint_sessions | (user_id, subject_id, status) | 突击会话幂等激活/列表 |
+| `ix_subjects_level`（M5） | subjects | (level, is_active) | 分层列表/广场过滤 |
+| `ix_course_aliases_template`（M5） | course_aliases | template_subject_id | 按模板查别名 |
+| `ix_user_subjects_template`（M5） | user_subjects | (user_id, template_subject_id) | 用户课程→模板题源 |
 
 > 向量 HNSW 参数：`m=16, ef_construction=64`（pgvector 默认推荐），数据量增长后可按需调整 `ef_search`（查询时指定）。
 
@@ -493,7 +520,7 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 
 ## 5. 迁移与种子
 
-- 迁移：Alembic（`backend/alembic/`），初始迁移 `versions/0001_initial.py` 建全部 M1 表 + 索引 + `CREATE EXTENSION IF NOT EXISTS vector`；M2 增量迁移 `versions/0002_m2_diagnosis_checkin_ocr.py`（streak / checked_in_at / ocr_uploads / diagnosis_reports / textbook_uploads）；M3 增量迁移 `versions/0003_m3_sprint.py`（sprint_sessions 新表）。
+- 迁移：Alembic（`backend/alembic/`），初始迁移 `versions/0001_initial.py` 建全部 M1 表 + 索引 + `CREATE EXTENSION IF NOT EXISTS vector`；M2 增量迁移 `versions/0002_m2_diagnosis_checkin_ocr.py`（streak / checked_in_at / ocr_uploads / diagnosis_reports / textbook_uploads）；M3 增量迁移 `versions/0003_m3_sprint.py`（sprint_sessions 新表）；M5 增量迁移 `versions/0006_course_alias_level.py`（course_aliases 新表 + subjects.level + user_subjects.template_subject_id，down_revision=0005_user_major_plaza）。
 - 配置：`DATABASE_URL` 环境变量（如 `postgresql+psycopg://aceexam:aceexam@localhost:5432/aceexam`），`.env` 不入库。
 - 种子：`backend/app/db/seed.py`（纯 SQLAlchemy 脚本，不依赖 FastAPI），幂等（已存在科目则跳过或 --reset 清空重建）。
 - 种子内容：
@@ -502,6 +529,7 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
   - 每科题库：≥ 30 题（含答案 + 解析，直接可刷）
   - `document_chunks`（M2 补充）：高数教材示例分块语料 7 块（source='textbook'，embedding 置空由后台 embedder 回填），供 RAG 讲解/dev 检索使用
   - M3 演示数据（§9.2）：3 个演示用户（含会员）+ 备考计划 + 近 14 天 study_sessions 打卡/做题记录 + user_knowledge_states 样本 + 一条 active sprint_sessions 快照，供连胜/排行榜/看板/预警/突击页面演示
+  - M5 种子（§12）：公共课（高数/英语/线代/概率论/大物）`level='public'`；`course_aliases` 种子 19 条（"高等数学A"/"高数上"/"高数"→math_gaoshu，"大学英语"/"英语一"/"英语二"→eng_college 等，source='seed', is_verified=true）
 
 ---
 
@@ -573,3 +601,28 @@ CHECK：`status IN ('untouched','consolidating','mastered','weak')`
 - **排行榜**：纯查询优于聚合表/物化视图——MVP 用户量小、聚合毫秒级、缓存收益低；少一张表少一处刷新任务。**预留**（用户量 > 1k 或查询 > 100ms 时启用）：`leaderboard_snapshots`（每日快照：user_id / subject_id / total_correct / accuracy / current_streak / snapshot_date，UNIQUE(user_id, subject_id, snapshot_date)），M3 不建。
 - **挂科预警**：预警是实时推导的瞬态视图（同一天看结果一致），无历史/推送需求，复用现有表实时计算。**预留**（V2 要"预警推送/历史趋势"时启用）：`risk_alerts`（user_id / subject_id / knowledge_point_id / risk_level / reasons JSONB / triggered_at / handled），M3 不建。
 - **演示数据**：M3 功能（连胜/排行榜/看板/预警/突击）全部实时推导，需要用户维度的历史数据才能演示——seed.py 补充 3 个演示用户（`demo_student1` 会员·考前 7 天·近 5 天连胜 / `demo_student2` 会员·14 天连胜·高正确率 / `demo_free` 免费·低活跃·无计划）+ 对应 plans / study_sessions（近 14 天打卡+做题）/ user_knowledge_states / 一条 active sprint_sessions 快照。演示密码统一 `demo123456`（仅本地开发用）。
+
+---
+
+## 12. M5 表增量（T29 交付）
+
+> 落地迁移：`backend/alembic/versions/0006_course_alias_level.py`（down_revision=0005_user_major_plaza）。
+> 事实来源：architecture.md §14.2 / §14.5（课程三级归一对齐）+ 决策 D19/D20；本小节与迁移脚本同步更新（评审后锁定）。
+
+### 12.1 变更清单
+
+| # | 对象 | 变更 | 说明 |
+|---|---|---|---|
+| 1 | `course_aliases` | 新表 | 同课多名归一缓存与飞轮：alias → template_subject_id（架构 §14.2 / D20），见 §2.18 |
+| 2 | `subjects.level` | 增列 | 课程分层 `public` / `major` / `school`（NOT NULL DEFAULT 'public' + CHECK），见 §2.2 |
+| 3 | `subjects` | 新索引 | `ix_subjects_level`（(level, is_active)，分层列表/广场过滤，架构 §14.5-2） |
+| 4 | `user_subjects.template_subject_id` | 增列 | 校本课程实例映射到的模板课程外键（UUID NULL FK→subjects.id；NULL=未归一独立实例），架构 §14.2 / D19 |
+| 5 | `user_subjects` | 新索引 | `ix_user_subjects_template`（(user_id, template_subject_id)，用户课程→模板题源，架构 §14.5-3） |
+| 6 | 种子数据 | 更新 | 公共课（高数/英语/线代/概率论/大物）`level='public'`（is_public=true 保持）；`course_aliases` 种子 19 条（source='seed', is_verified=true） |
+
+### 12.2 设计说明（评审结论）
+
+- **course_aliases 语义（D20）**：别名表 = 匹配缓存 + 飞轮。`UNIQUE(alias)` 保证同课多名→同一模板；不同 alias 可指向同一模板（多对一）。`is_verified=false` 仅作 AI 匹配候选、不直接采用；`source` 三级来源（seed/ai/manual）便于审计与清理。写入时机：种子（公共课别名）→ AI 匹配命中沉淀（幂等 upsert）→ 用户手动确认模板。
+- **subjects.level（D19）**：三级对齐的课程性质标签——`public` 公共课（题库由种子/AI/UGC 共建共享）/ `major` 专业基础课 / `school` 校本特色课（未归一化前的长尾实例，题库靠自身 UGC 攒）。`level` 与 M4 的 `is_public`（是否上广场）正交。
+- **user_subjects.template_subject_id（D19）**：`subject_id` 指向实际展示课程（可能 `level='school'`），`template_subject_id` 指向题目来源模板（可为自身）。刷题/检索一律按 `template_subject_id`（NULL 回退 `subject_id`）取题，保证「题目挂模板、用户列表显示校本名」。
+- **不做**：不建独立校本实例表/独立题池（D19）；校本实例 `subjects` 行 + `user_subjects` 行表达即可。课程名归一化（去空格/括号/学期/教材版本）为服务层职责（T31 course_matcher），表只存归一化结果。

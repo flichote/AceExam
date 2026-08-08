@@ -55,13 +55,18 @@ class User(Base):
 
 class Subject(Base):
     __tablename__ = "subjects"
-    __table_args__ = (UniqueConstraint("code", name="uq_subjects_code"),)
+    __table_args__ = (
+        CheckConstraint("level IN ('public','major','school')", name="ck_subjects_level"),
+        UniqueConstraint("code", name="uq_subjects_code"),
+        Index("ix_subjects_level", "level", "is_active"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    level: Mapped[str] = mapped_column(String(20), nullable=False, default="public")  # M5：课程分层 public/major/school（架构 §14.1 / D19）
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # M4：课程广场公共课
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -438,9 +443,40 @@ class UserSubject(Base):
         UniqueConstraint("user_id", "subject_id", name="uq_us_user_subject"),
         Index("ix_us_user_id", "user_id"),
         Index("ix_us_subject_id", "subject_id"),
+        Index("ix_user_subjects_template", "user_id", "template_subject_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subjects.id"), nullable=False)
+    template_subject_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("subjects.id"), nullable=True)  # M5：校本课程实例映射到的模板课程（NULL=未归一独立实例；刷题/检索按 template_subject_id，NULL 回退 subject_id，架构 §14.2 / D19）
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+# ── M5: 课程别名表（课程归一对齐飞轮）──
+
+
+class CourseAlias(Base):
+    """课程别名表 — 同课多名归一缓存与飞轮（M5 新表，架构 §14.2）。
+
+    来源：seed（种子）| ai（AI 匹配沉淀）| manual（人工确认）。
+    is_verified 控制是否直接用于别名精确命中（false 时仅作 AI 匹配候选）。
+    """
+
+    __tablename__ = "course_aliases"
+    __table_args__ = (
+        UniqueConstraint("alias", name="uq_course_aliases_alias"),
+        Index("ix_course_aliases_template", "template_subject_id"),
+        CheckConstraint(
+            "source IN ('seed','ai','manual')",
+            name="ck_course_aliases_source",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alias: Mapped[str] = mapped_column(String(100), nullable=False)  # 归一化课程名（去空格/括号/学期/教材版本噪声）
+    template_subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subjects.id"), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="seed")  # seed / ai / manual
+    is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
