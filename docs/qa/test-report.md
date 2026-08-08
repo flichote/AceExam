@@ -412,3 +412,140 @@ PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m3_*.py -q   # M3 专�
 | M3 新阻断 | — | — | ⚠️ D-20（图谱多章 root 丢失）建议修复后放开图谱页面；D-21/D-22 为 P2/P3 可排期 |
 
 **发布建议**：M2 三个 P1/P2 阻断（判分/出题/题目详情）已由 T15 修复并自动验证；M3 主链路（看板/排行/预警/突击/打卡连胜）验收通过。建议优先修复 D-20（多章科目图谱空白，影响真实使用），D-21/D-22 可随下个里程碑排期。缺陷用例均已 xfail 固化，修复后自动转 XPASS。
+
+---
+
+# AceExam 测试报告（M3.5 TTS/UGC/班级/分享卡验收）
+
+> 文档归属：`docs/qa/`（ep-qa 测试工程师产出）
+> 关联任务：T23 M3.5 验收测试（kanban t_7b665a57）
+> 基线：`backend @ 2edfd57 + bc6a8cf`、`frontend @ dab2aec`（T20/T21/T22 交付后）
+> 执行环境：Windows / backend/.venv (Python 3.11.15) / node v22.23.1
+> 范围：TTS 语音 / UGC 投稿审核 / 班级 / 分享卡 四模块验收 + 全量回归
+
+---
+
+## 17. M3.5 测试范围与新增用例
+
+| 模块 | 验收点（api.md §12） | 新增/扩展测试文件 | 用例数 |
+|---|---|---|---|
+| TTS 生成 | 会员鉴权、会话归属 404、无讲解 404、voice 白名单 422、mock edge-tts 合成 200、缓存幂等、上游失败 502 | `tests/test_m35_tts_api.py`（新建） | 16（2 xfail D-23/D-24） |
+| 音频流 | 真实路由下载 200 audio/mpeg、缓存缺失 404、免费用户 403 | `tests/test_m35_tts_api.py` | 4（1 xfail D-24） |
+| UGC 投稿 | 201+pending、<15 字 422、answer-type 校验、重复 409 | `tests/test_m35_api.py`（既有） | 3 |
+| UGC 审核 | admin 鉴权 403、列表 status 过滤、approve→active、reject 需 reason 422、reject→rejected+reason、已审重审 409、非 UGC 422、404 | `tests/test_m35_api.py`（扩展 7 用例） | 10 |
+| 班级 | 建班 6 位邀请码、邀请码加入、GET /me/class、二选一 422、无效码 404 | `tests/test_m35_api.py`（扩展 3 用例） | 7 |
+| 分享卡 | totals/recent_7d/streak/mastery/weak_points/class/exam 聚合、全零边界 | `tests/test_m35_api.py`（扩展 5 用例） | 7（2 xfail D-26、1 xfail D-27） |
+| 班级排行 | scope=class 未加入 422、同班过滤、subject 叠加过滤 | `tests/test_m35_api.py`（扩展 1 用例） | 3 |
+| 合计（新增） | | | **34 用例（其中新增/扩展 16，M3.5 专项共 89 项 + 5 xfail）** |
+
+实现说明：
+- 上游 edge-tts 一律 mock（`monkeypatch edge_tts.Communicate.stream` 返回假音频字节），不真调网络；TTS 磁盘缓存目录用 `tmp_path` 隔离，不污染仓库。
+- 技术选型沿用 M1~M3：pytest + pytest-asyncio（asyncio_mode=auto）+ httpx ASGITransport + 直接入库种子。
+- 发现的 5 个新缺陷（D-23~D-27）按约定用非严格 xfail 固化契约，修复后自动转 XPASS 验证。
+
+## 18. 执行结果（M3.5 实测）
+
+### 18.1 M3.5 专项套件
+
+```
+89 passed, 5 xfailed in 80.07s
+```
+
+### 18.2 后端 pytest 全量回归
+
+```
+472 passed, 1 failed, 9 xfailed, 9 xpassed in 392.38s
+```
+
+- T23 开工前基线：`397 项（M3 全量）`；本次全量 491 项（+94 项为 M3.5 新增）。
+- 唯一失败：`tests/test_config.py::test_default_database_url` —— **预存环境性失败**（本地开发配置 `DATABASE_URL=sqlite+aiosqlite:///./aceexam.db`，测试断言默认应为 asyncpg PG 串），与 T17/T18 交接记录一致，非本次引入。
+- **9 个 XPASS** = M2 缺陷契约自动验证通过（D-8/D-9/D-11/D-15×4/D-16 等已修复用例转 XPASS 确认）。
+- 5 个 M3.5 xfail = D-23/D-24/D-26×2/D-27（本批新增，见 §20）。
+- 回归结论：**M1~M3 主链路测试全部保持通过**（唯一失败为环境性 test_config），M3.5 新增功能除 TTS 播放链路（D-24）与 share-card 考试/掌握度分支（D-26）外均通过。
+
+### 18.3 前端烟测
+
+```
+cd frontend && npm run build
+→ DONE  Build complete.   (仅 Dart Sass legacy-js-api 弃用警告)
+```
+
+### 18.4 运行方式（复现）
+
+```bash
+cd backend
+PYTHONPATH= .venv/Scripts/python.exe -m pytest -q                                    # 全量
+PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m35_*.py -q               # M3.5 专项
+PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m35_tts_api.py -v        # TTS 专项
+```
+
+## 19. M3.5 验收点清单（对照 api.md §12）
+
+| 验收点 | 状态 | 说明 |
+|---|---|---|
+| §12.1 TTS 生成：会员鉴权 | ✅ 通过 | 免费用户 403；未登录 401 |
+| §12.1 TTS 生成：会话归属 | ✅ 通过 | 不存在/非本人 session → 404 |
+| §12.1 TTS 生成：无讲解内容 | ✅ 通过 | 无 assistant 消息/空白内容 → 404 EXPLANATION_NOT_FOUND |
+| §12.1 TTS 生成：voice 白名单 | ✅ 通过 | 非法 voice → 422；缺省默认 Xiaoxiao |
+| §12.1 TTS 生成：mock edge-tts 合成 | ✅ 通过 | 200 + audio_url/voice/text_preview/cache_hit=false；LaTeX 清洗后中文保留 |
+| §12.1 TTS 生成：缓存幂等 | ✅ 通过 | 同 session 同 voice 二次调用 cache_hit=true，不重复合成 |
+| §12.1 TTS 生成：上游失败 | ✅ 通过 | edge-tts 异常 → 502 TTS_UNAVAILABLE |
+| §12.1 TTS 生成：audio_url 可播放 | ❌ 阻断（D-24） | 返回 `/api/v1/tts/audio/...`，真实路由 `/api/v1/chat/tts/audio/...` → 前端按 audio_url 请求必 404 |
+| §12.1 TTS 生成：display math 清洗 | ❌ 缺陷（D-23） | `$$...$$` 不被 `_clean_text_for_tts` 剥光，LaTeX 命令会进 TTS 语音 |
+| §12.2 音频流下载 | ⚠️ 部分（D-24/D-25） | 真实路由 200 audio/mpeg + Range 支持通过；audio_url 与路由不一致（D-24）；鉴权实现为会员，契约写登录（D-25） |
+| §12.3 UGC 投稿 | ✅ 通过 | 201+pending+source=ugc；<15 字 422；answer 与选项 key 匹配 422；内容重复 409 DUPLICATE |
+| §12.4 审核列表 | ✅ 通过 | admin 鉴权（非 admin 403）；status=pending/active/rejected 过滤；total/items 正确 |
+| §12.5 审核状态机 | ✅ 通过 | approve→active；reject 需 reason（422）；reject→rejected+reject_reason 落库；已审重审 409；非 UGC 422；不存在 404 |
+| §12.6 建班/加入 | ✅ 通过 | 建班 201/200 + 6 位邀请码 + is_creator；邀请码加入（不返回 invite_code）；二选一 422；无效码 404 |
+| §12.7 /me/class | ✅ 通过 | 已加入返回 class+my_rank（member_count 实时）；未加入 class=null+my_rank=null |
+| §12.7 scope=class 排行 | ✅ 通过 | 未加入 422 CLASS_NOT_JOINED；只聚合同班成员（非同班用户排除）；subject_id 叠加过滤正确 |
+| §12.8 share-card：totals/recent_7d | ✅ 通过 | 做题量/正确数/正确率聚合正确；recent_7d 只统计近 7 天（8 天前仅进 totals）；全零用户返回 0 值 |
+| §12.8 share-card：streak | ✅ 通过 | 3 天连续打卡 → current=3/longest=3 |
+| §12.8 share-card：mastery/weak_points | ❌ 阻断（D-26） | 有 UserKnowledgeState 数据 → best_subject 段 NameError → 500 |
+| §12.8 share-card：exam 倒计时 | ❌ 阻断（D-26） | 有 active 计划（exam_date）→ exam 段 NameError → 500 |
+| §12.8 share-card：class 区块 | ⚠️ 缺陷（D-27） | 实现字段名 `class_`，契约/前端消费 `class` → 海报班级区块永不显示 |
+
+## 20. M3.5 缺陷记录（新增）
+
+> 按工作约定只记录不修改业务代码；以下缺陷需 ep-backend / ep-ai 修复。
+
+### D-23 [P3] TTS 文本清洗不处理 display math（$$...$$）
+- **现象**：讲解文本含 `$$...$$` 展示公式时，`chat.py::_clean_text_for_tts` 仅用 `re.sub(r'\$[^$]*\$', '', content)` 剥 inline math，`$$...$$` 残留 LaTeX 命令（如 `\lim`、`\frac`）进入 TTS 语音。
+- **根因**：`_clean_text_for_tts` 与 `tts_service.preprocess_text`（正确处理 display math）实现不一致，chat 端点未复用后者。
+- **影响**：公式题讲解语音会朗读 LaTeX 命令，体验缺陷。
+- **用例**：`test_m35_tts_api.py::TestTTSValidation::test_tts_display_math_not_stripped`（xfail）。
+
+### D-24 [P1] TTS audio_url 与真实路由不一致 → 前端播放必 404
+- **现象**：`POST /chat/explain/{id}/tts` 返回 `audio_url: "/api/v1/tts/audio/{hash}.mp3"`，但 GET 音频真实路由为 `/api/v1/chat/tts/audio/{hash}.mp3`（chat router prefix=`/chat`）。前端 `resolveAudioUrl` 直接 origin+audio_url 请求 → 404。
+- **根因**：`chat.py generate_tts` 拼 audio_url 时漏掉 `/chat` 段。
+- **影响**：TTS 生成成功但音频播放链路完全不可用。
+- **用例**：`test_m35_tts_api.py::TestTTSAudioDownload::test_audio_url_from_tts_matches_route`（xfail）。
+
+### D-25 [P3] 音频下载鉴权与契约不符
+- **现象**：契约 §12.2 写"鉴权：登录"，实现 `get_tts_audio` 用 `get_current_member`（免费用户 403）。
+- **影响**：免费用户即使拿到音频 URL 也无法播放（与 §12.1 会员语义一致，可能是有意设计，需契约对齐）。
+- **用例**：`test_m35_tts_api.py::TestTTSAudioDownload::test_audio_download_free_user_forbidden`（按实现固化 403）。
+
+### D-26 [P1] share-card 使用未定义的 Subject → 500
+- **现象**：`GET /me/share-card` 在两类数据下 500：① 有 `user_knowledge_states` 数据（best_subject 分支）；② 有 active 计划且 `exam_date` 非空（exam 分支）。
+- **根因**：`me.py` 模块顶部未导入 `Subject`；best_subject 段局部 `from app.db.models import Subject as _Subject` 但查询写的是 `select(Subject.name)`（line 236），exam 段直接 `select(Subject.name)`（line 274）→ NameError。
+- **影响**：分享卡在真实用户（有掌握度/有备考计划）下必 500，仅全零用户可用。
+- **用例**：`test_m35_api.py::TestShareCard::test_share_card_mastery_and_weak`、`test_share_card_exam_days_left`（均 xfail）。
+
+### D-27 [P2] share-card 班级字段序列化为 class_ 而非 class
+- **现象**：`ShareCardResponse.class_` 无 pydantic alias，响应 JSON 键为 `"class_"`；契约 §12.8 与前端 `SharePoster.vue`（`d.class`）均消费 `"class"` → 海报班级区块永不显示。
+- **根因**：schema 字段名带下划线后缀且未配 `Field(alias="class")`。
+- **影响**：班级区块静默缺失。
+- **用例**：`test_m35_api.py::TestShareCard::test_share_card_class_field_contract`（xfail）。
+
+## 21. 四里程碑质量门禁汇总
+
+| 门禁 | M1（T6） | M2（T12） | M3（T18） | M3.5（T23） |
+|---|---|---|---|---|
+| pytest 单元/集成 | ✅ 178 passed | ⚠️ 274 passed / 10 xfailed / 2 failed（D-12 预存） | ✅ 383 passed / 5 xfailed / 8 xpassed | ✅ **472 passed / 9 xfailed / 9 xpassed**（1 failed 为 test_config 预存环境性） |
+| 前端构建烟测 | ✅ npm run build | ✅ npm run build:h5 | ✅ npm run build | ✅ npm run build（DONE） |
+| M3.5 新增功能 | — | — | — | TTS 生成/音频流、UGC 审核状态机、班级、scope=class 排行 ✅；分享卡 ⚠️ D-26 阻断 mastery/exam 分支 |
+| 三层质量门禁（pytest / OCR / RAG） | pytest ✅；OCR 待 M2；RAG mock 层 ✅ | 五件套 49 用例 + OCR mock 流程 ✅ | pytest ✅；OCR/RAG 回归随全量通过 | pytest ✅（M3.5 34 用例）；OCR/RAG 随全量回归通过 |
+| 新阻断缺陷 | — | D-8/D-15/D-16 | D-20（图谱多章 root 丢失，M3 遗留 xfail） | ⚠️ D-24（TTS 播放 404）、D-26（share-card 500）建议修复后放开对应页面 |
+
+**发布建议**：M3.5 的 TTS 生成、UGC 投稿/审核状态机、班级、班级排行主链路验收通过；**D-24（TTS 播放 404）与 D-26（分享卡 mastery/exam 分支 500）为 P1 阻断，建议修复后放开 TTS 播放与分享卡页面**；D-25/D-27 为契约对齐（P3/P2），可随下个里程碑排期。缺陷用例均已 xfail 固化，修复后自动转 XPASS。
