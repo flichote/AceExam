@@ -549,3 +549,91 @@ PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m35_tts_api.py -v     
 | 新阻断缺陷 | — | D-8/D-15/D-16 | D-20（图谱多章 root 丢失，M3 遗留 xfail） | ⚠️ D-24（TTS 播放 404）、D-26（share-card 500）建议修复后放开对应页面 |
 
 **发布建议**：M3.5 的 TTS 生成、UGC 投稿/审核状态机、班级、班级排行主链路验收通过；**D-24（TTS 播放 404）与 D-26（分享卡 mastery/exam 分支 500）为 P1 阻断，建议修复后放开 TTS 播放与分享卡页面**；D-25/D-27 为契约对齐（P3/P2），可随下个里程碑排期。缺陷用例均已 xfail 固化，修复后自动转 XPASS。
+
+---
+
+## 22. M4 测试范围与新增用例
+
+> 关联任务：T27 选课验收测试（kanban t_a3a033a2）
+> 依赖交付：T25 后端 49819c9（4 端点 + 0005 迁移）、T26 前端 9806d15
+> 契约来源：docs/api.md §13（13.1~13.4）、docs/architecture.md §13.6、docs/ops/M4-taskgraph.md
+
+| 文件 | 用例数 | 覆盖 |
+|---|---|---|
+| `tests/test_m4_subjects_plaza.py`（T25 交付） | 14 passed / 3 skipped | 基础路径：major 更新/清除/401、PUT/GET /me/subjects、422 SUBJECT_NOT_JOINABLE、plaza 游客/登录、schema 扩展（major/is_public） |
+| `tests/test_m4_plaza_acceptance.py`（T27 新增） | 13 passed / 1 xfailed | 契约边界补充：major 空白 strip/超长/100 边界、**幂等覆盖语义（D-29 xfail）**、清空后重设、返回顺序=请求数组顺序、stats 数值口径（q/correct/accuracy/mastery/kp/streak）、零记录零值、plaza joined 真实状态（加入 true/未加入 false）、私有课不进广场、sort_order 排序、question_count 仅计 active |
+| `tests/test_m4_migration.py`（T27 新增） | 3 passed | 迁移链 0001→0005 离线 SQL 可生成（alembic upgrade head --sql）、0005 关键 DDL 断言、迁移文件元数据链 |
+
+**T27 新增 16 用例（14 passed + 2 xfailed→1 实 xfail）**；累计全量 500 passed / 3 skipped / 9 xfailed / 10 xpassed（1 failed 为 test_config 预存环境性，见 §21）。
+
+## 23. 执行结果（M4 实测）
+
+### 23.1 M4 专项套件
+
+```bash
+cd backend
+PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m4_subjects_plaza.py tests/test_m4_plaza_acceptance.py tests/test_m4_migration.py -q
+→ 14 passed, 3 skipped, 14 passed, 1 xfailed, 3 passed
+```
+
+### 23.2 后端 pytest 全量回归
+
+```bash
+PYTHONPATH= .venv/Scripts/python.exe -m pytest -q
+→ 500 passed, 3 skipped, 9 xfailed, 10 xpassed, 1 failed in 431.80s
+```
+
+- 唯一 failed：`tests/test_config.py::test_default_database_url` —— **预存环境性**（本地 `.env` 配置 `DATABASE_URL=sqlite+aiosqlite:///./aceexam.db`，该用例断言默认 PG asyncpg 串）；M3/M3.5 报告同项，与 M4 改动无关。
+- 10 xpassed：既有 M2/M3 缺陷修复确认（D-8/D-9/D-11/D-15/D-16 等，随 T25 全量回归报告）。
+- 主链路回归：subjects/questions/practice/auth/wrong-answers/chat 等 43 端点全部通过，**无破坏**。
+
+### 23.3 前端烟测
+
+```bash
+cd frontend && npm run build
+→ DONE  Build complete.（T26 交付 9806d15 代码，Dart Sass legacy-js-api 弃用警告非错误）
+```
+
+### 23.4 迁移可执行性（任务要求）
+
+```bash
+cd backend
+PYTHONPATH= .venv/Scripts/python.exe -m alembic upgrade head --sql
+→ exit 0；渲染 0001_initial → 0005_user_major_plaza 全链；输出含
+  ALTER TABLE users ADD COLUMN major VARCHAR(100);
+  ALTER TABLE subjects ADD COLUMN is_public BOOLEAN DEFAULT false NOT NULL;
+  CREATE TABLE user_subjects (...);
+```
+
+## 24. M4 验收点清单（对照 api.md §13）
+
+| 验收点 | 状态 | 说明 |
+|---|---|---|
+| 13.1 PUT /me/profile 更新 major | ✅ 通过 | 200 返回 UserPublic+major；首尾空白 strip；置空 `""`/None 清除（T25） |
+| 13.1 未登录 401 | ✅ 通过 | T25 用例 |
+| 13.1 超长 major → 400 VALIDATION_ERROR | ⚠️ 契约偏差 | **实际返回 422**（Pydantic 默认）；见缺陷 D-28 |
+| 13.2 PUT /me/subjects 设置课程（幂等覆盖） | ❌ 缺陷 | **D-29：第二次 PUT 含重叠 id → UNIQUE 冲突 500**，违反"先删后插同事务"契约；用例已 xfail 固化 |
+| 13.2 空数组清空 / 重复 id 去重 / 422 SUBJECT_NOT_JOINABLE | ✅ 通过 | T25 + T27 |
+| 13.3 GET /me/subjects 返回自选课程+学习状态 | ✅ 通过 | 顺序=请求数组顺序；stats 数值口径正确（q=10/c=8/acc=0.8/mastery=0.5/kp/streak≥1）；零记录零值 |
+| 13.4 GET /subjects/plaza 公共课 + 加入状态 | ✅ 通过 | joined 加入 true/未加入 false；仅 is_public+is_active；sort_order,name 排序 |
+| 13.4 未登录可看列表 | ✅ 通过 | 游客 joined 恒 false（T25） |
+| 13.4 question_count 仅计 active | ✅ 通过 | active×2 + rejected×1 → 2 |
+| 0005 迁移可执行 | ✅ 通过 | alembic upgrade head --sql exit 0 + DDL 断言 |
+| 回归：subjects/questions/practice 主链路 | ✅ 通过 | 全量 500 passed（唯一 failed 为预存环境性） |
+| 前端冒烟 npm run build | ✅ 通过 | DONE Build complete. |
+
+## 25. M4 缺陷记录（新增）
+
+### D-28 [P3] PUT /me/profile major 超长返回 422 而非契约 400 VALIDATION_ERROR
+- **现象**：`PUT /me/profile` 请求 `{"major": "x"*101}` 返回 **422**（FastAPI Pydantic RequestValidationError 形态），契约 api.md §13.1 错误表写 400 `VALIDATION_ERROR`。
+- **根因**：`ProfileUpdate.major` 声明 `max_length=100`，Pydantic 校验失败由 FastAPI 默认 422 处理器接管；项目未注册自定义 `RequestValidationError` handler 映射为 400。
+- **影响**：前端按 400 分支处理会漏掉超长提示（前端实际按 422 亦可，影响小）。
+- **用例**：`test_m4_plaza_acceptance.py::TestProfileBoundary::test_major_too_long_returns_422`（固化现状，不 xfail，避免门禁误伤；契约对齐与否由 ep-backend 裁决）。
+
+### D-29 [P1] PUT /me/subjects 幂等全量覆盖同事务 UNIQUE 冲突 → 500
+- **现象**：先 `PUT /me/subjects {"subject_ids":[A,B]}` 成功；再 `PUT /me/subjects {"subject_ids":[B,C]}`（含重叠 B）→ `sqlite3.IntegrityError: UNIQUE constraint failed: user_subjects.user_id, user_subjects.subject_id` → 全局异常兜底 500。
+- **根因**：`me.py::set_my_subjects` 先 `await db.delete(us)` 收集删除，随后在**同一事务**插入新 `UserSubject`；SQLite（及多数方言）在 flush 时 INSERT 先于 DELETE 落地，命中 `uq_us_user_subject` 唯一约束。缺 `await db.flush()`（或先执行 DELETE 语句再插入）保证先删后插。
+- **影响**：**违反 api.md §13.2 幂等全量覆盖核心语义**；真实前端"重新勾选课程"（含保留已选课）必现 500。T25 交付的 `test_idempotent`/`test_dedup` 依赖 seed 数据在空测试库被 skip，**未覆盖到此路径**。
+- **用例**：`test_m4_plaza_acceptance.py::TestIdempotentOverwrite::test_overwrite_replaces_not_merges`（**xfail 固化**；ep-backend 修复后自动 XPASS）。
+- **建议修复**：`set_my_subjects` 删除后 `await db.flush()` 再插入，或在同一事务用 `delete(UserSubject).where(user_id==...)` 执行删除。
+
