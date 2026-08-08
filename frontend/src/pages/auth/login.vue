@@ -59,13 +59,19 @@ async function onLogin() {
   const ok = await auth.login(username.value.trim(), password.value);
   if (!ok) return;
   uni.showToast({ title: "登录成功 🎉", icon: "none" });
-  // 首次使用：未配置专业/课程 → 选课引导（docs/api.md §13 / architecture.md §13.3）
+  // 首次使用：未配置专业/课程 → 选课引导（docs/api.md §13 / architecture.md §3.3）
   const needsOnboarding = await checkNeedsOnboarding();
   setTimeout(() => {
     if (needsOnboarding) {
       uni.reLaunch({ url: "/pages/onboarding/index" });
-    } else {
+      return;
+    }
+    // 退出登录用 reLaunch 清空过页面栈（栈内仅 login 页），navigateBack 会失败；
+    // 此时应切回 tabBar 首页。
+    if (getCurrentPages().length > 1) {
       uni.navigateBack();
+    } else {
+      uni.switchTab({ url: "/pages/subjects/index" });
     }
   }, 600);
 }
