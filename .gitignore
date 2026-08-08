@@ -46,3 +46,6 @@ htmlcov/
 
 # --- Kanban dashboard (generated) ---
 kanban/kanban-dashboard.html
+
+# --- Media / runtime artifacts ---
+media/
