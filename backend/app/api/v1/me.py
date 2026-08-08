@@ -375,6 +375,9 @@ async def set_my_subjects(
     )
     for us in existing.scalars().all():
         await db.delete(us)
+    # 关键：显式 flush 先执行 DELETE，避免 SQLAlchemy 默认 INSERT 先于 DELETE
+    # 导致重复插入触发 UNIQUE(user_id, subject_id) 约束冲突。
+    await db.flush()
 
     # 按数组顺序插入（第 1 个最早）
     now = datetime.now(timezone.utc)
