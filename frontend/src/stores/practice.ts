@@ -36,6 +36,12 @@ export const usePracticeStore = defineStore("practice", {
     knowledgeState: null as KnowledgeState | null,
     /** 作答起始时间戳（time_spent_seconds） */
     _answeredAt: 0,
+    /** 本组答对题数（结算面板统计） */
+    correctCount: 0,
+    /** 本组是否已全部作答完成（答完最后一题） */
+    finished: false,
+    /** 每题作答结果：questionId → 是否答对（结算面板逐题回顾） */
+    results: {} as Record<string, boolean>,
   }),
 
   getters: {
@@ -87,6 +93,9 @@ export const usePracticeStore = defineStore("practice", {
           if (!this.seenIds.includes(q.id)) this.seenIds.push(q.id);
         });
         this.index = 0;
+        this.correctCount = 0;
+        this.finished = false;
+        this.results = {};
         this.resetAnswer();
         await this.loadKnowledgePoints(subjectId_);
       } catch (e) {
@@ -134,6 +143,8 @@ export const usePracticeStore = defineStore("practice", {
         const res = await submitQuestionAnswer(q.id, answer, timeSpent, "practice");
         this.answered = true;
         this.isCorrect = res.correct;
+        if (res.correct) this.correctCount += 1;
+        this.results[q.id] = res.correct;
         q.answer = Array.isArray(res.correct_answer)
           ? res.correct_answer
           : res.correct_answer
@@ -156,11 +167,23 @@ export const usePracticeStore = defineStore("practice", {
       if (this.index < this.questions.length - 1) {
         this.index += 1;
         this.resetAnswer();
+      } else if (this.answered) {
+        // 答完最后一题：进入结算面板（对错统计 + 解析回顾）
+        this.finished = true;
       }
+    },
+
+    /** 结算后查看本题解析（从结算面板回到最后一题） */
+    reviewLast() {
+      this.finished = false;
+      this.explanationVisible = true;
     },
 
     restart() {
       this.index = 0;
+      this.correctCount = 0;
+      this.finished = false;
+      this.results = {};
       this.resetAnswer();
     },
   },

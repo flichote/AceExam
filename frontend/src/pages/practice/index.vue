@@ -72,6 +72,43 @@
       />
     </view>
 
+    <!-- 结算面板：答完最后一题后展示本组对错统计 -->
+    <view v-else-if="practice.finished" class="content">
+      <view class="result-card">
+        <view class="result-head">
+          <text class="result-icon">{{ practice.correctCount >= practice.total / 2 ? "🎉" : "💪" }}</text>
+          <text class="result-title">
+            {{ practice.correctCount >= practice.total / 2 ? "太棒了！本组完成" : "本组完成，继续加油！" }}
+          </text>
+          <text class="result-sub">共 {{ practice.total }} 题，答对 {{ practice.correctCount }} 题</text>
+        </view>
+
+        <!-- 每题对错回顾 -->
+        <view class="result-list">
+          <view
+            v-for="(q, i) in practice.questions"
+            :key="q.id"
+            class="result-item"
+            @click="practice.finished = false; practice.index = i; practice.explanationVisible = true"
+          >
+            <text class="result-item-mark" :class="practice.results[q.id] ? 'mark--ok' : 'mark--no'">
+              {{ practice.results[q.id] ? "✓" : "✗" }}
+            </text>
+            <text class="result-item-text">{{ i + 1 }}. {{ q.stem.slice(0, 24) }}{{ q.stem.length > 24 ? "…" : "" }}</text>
+          </view>
+        </view>
+
+        <view class="result-actions">
+          <view class="btn btn--plain" @click="practice.reviewLast">
+            <text class="btn-text">查看最后一题解析</text>
+          </view>
+          <view class="btn btn--primary" @click="practice.restart">
+            <text class="btn-text">再来一组</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
     <!-- 题目 -->
     <template v-else>
       <view class="content">
@@ -99,6 +136,7 @@
         <template v-else>
           <AnswerFeedback
             :is-correct="practice.isCorrect"
+            :is-last="practice.index === practice.total - 1"
             @view-explain="practice.toggleExplanation"
             @ask-ai="goAiExplain"
             @next="practice.next"
@@ -374,5 +412,78 @@ function goAiExplain() {
   font-size: $font-card-title;
   font-weight: 700;
   color: $neutral-900;
+}
+
+/* ── 结算面板（答完最后一题）── */
+.result-card {
+  background: #fff;
+  border-radius: 24rpx;
+  padding: 40rpx 32rpx;
+}
+.result-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 32rpx;
+}
+.result-icon {
+  font-size: 72rpx;
+  margin-bottom: 12rpx;
+}
+.result-title {
+  font-size: $font-card-title;
+  font-weight: 700;
+  color: $neutral-900;
+}
+.result-sub {
+  font-size: $font-aux;
+  color: $neutral-500;
+  margin-top: 8rpx;
+}
+.result-list {
+  border-top: 1rpx solid $neutral-300;
+  padding-top: 16rpx;
+  margin-bottom: 32rpx;
+  max-height: 420rpx;
+  overflow-y: auto;
+}
+.result-item {
+  display: flex;
+  align-items: center;
+  padding: 14rpx 0;
+  border-bottom: 1rpx solid $neutral-100;
+}
+.result-item-mark {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  color: #fff;
+  margin-right: 16rpx;
+  flex-shrink: 0;
+}
+.mark--ok {
+  background: #10b981;
+}
+.mark--no {
+  background: #ef4444;
+}
+.result-item-text {
+  font-size: $font-body;
+  color: $neutral-500;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.result-actions {
+  display: flex;
+  gap: 16rpx;
+}
+.result-actions .btn {
+  flex: 1;
 }
 </style>
