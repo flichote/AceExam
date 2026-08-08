@@ -9,11 +9,16 @@
     >
       <view class="chat-list-inner">
         <view
-          v-for="m in chatStore.messages"
+          v-for="(m, idx) in chatStore.messages"
           :key="m.id"
           :id="`anchor-${m.id}`"
         >
           <ChatMessage :message="m" :uncovered="chatStore.uncovered" />
+          <!-- M3.5 TTS：讲解完成后（最后一条含分步卡的非流式消息）显示「🔊 听讲解」 -->
+          <TtsPlayer
+            v-if="idx === lastExplanationIndex && chatStore.sessionId"
+            :session-id="chatStore.sessionId"
+          />
         </view>
       </view>
     </scroll-view>
@@ -45,6 +50,7 @@ import { computed, nextTick, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { useChatStore } from "@/stores/chat";
 import ChatMessage from "@/components/ChatMessage.vue";
+import TtsPlayer from "@/components/TtsPlayer.vue";
 
 const chatStore = useChatStore();
 const draft = ref("");
@@ -88,6 +94,22 @@ const inputPlaceholder = computed(() => {
 const lastMsgId = computed(() => {
   const msgs = chatStore.messages;
   return msgs.length ? msgs[msgs.length - 1].id : "";
+});
+
+/**
+ * 最后一条「已完成的分步讲解」消息索引（M3.5 TTS 按钮挂载点）：
+ * 讲解/追问完成后（assistant + steps + 非流式），取最后一条。
+ */
+const lastExplanationIndex = computed(() => {
+  const msgs = chatStore.messages;
+  let idx = -1;
+  for (let i = 0; i < msgs.length; i += 1) {
+    const m = msgs[i];
+    if (m.role === "assistant" && m.steps && m.steps.length && !m.streaming) {
+      idx = i;
+    }
+  }
+  return idx;
 });
 
 async function onSend() {

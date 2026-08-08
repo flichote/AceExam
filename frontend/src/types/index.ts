@@ -448,6 +448,8 @@ export interface LeaderboardResponse {
     questions_practiced: number;
     accuracy: number;
   } | null;
+  /** scope=class 时返回班级元信息（docs/api.md §12.7） */
+  class?: LeaderboardClassMeta | null;
 }
 
 /* ===== M3 挂科预警（§11.7）===== */
@@ -471,4 +473,74 @@ export interface WarningsResponse {
   overall_risk: RiskLevel | null;
   items: WarningItem[];
   generated_at: string;
+}
+
+/* ===== M3.5 TTS / UGC / 班级 / 海报（docs/api.md §12）===== */
+
+/** POST /chat/explain/{session_id}/tts 响应（§12.1） */
+export interface TtsResult {
+  session_id: string;
+  /** 相对路径 /api/v1/tts/audio/{file_hash}.mp3（前端拼 origin） */
+  audio_url: string;
+  voice: string;
+  text_preview: string;
+  cache_hit: boolean;
+  created_at: string;
+}
+
+/** POST /questions/ugc 响应（§12.3） */
+export interface UgcSubmitResult {
+  question_id: string;
+  status: "pending" | "active";
+  duplicated: boolean;
+}
+
+/** 班级信息（§12.6 / §12.7） */
+export interface ClassInfo {
+  id: string;
+  name: string;
+  /** 仅建班人返回，加入者 null */
+  invite_code: string | null;
+  member_count: number;
+  is_creator: boolean;
+}
+
+/** GET /me/class 响应（§12.7） */
+export interface MyClassResponse {
+  class: ClassInfo | null;
+  my_rank: { rank: number | null; total_correct: number } | null;
+}
+
+/** POST /me/class 响应（§12.6 建班/加入） */
+export interface JoinClassResult {
+  class: ClassInfo;
+  joined: boolean;
+}
+
+/** 班级榜 class 元信息（§12.7 修订） */
+export interface LeaderboardClassMeta {
+  id: string;
+  name: string;
+  member_count: number;
+}
+
+/** GET /me/share-card 响应（§12.8） */
+export interface ShareCardData {
+  username: string;
+  generated_at: string;
+  share_card_version: number;
+  totals: { questions_practiced: number; correct_count: number; accuracy: number };
+  recent_7d: { questions_practiced: number; correct_count: number; accuracy: number };
+  streak: { current: number; longest: number };
+  mastery: {
+    overall_pct: number;
+    best_subject: {
+      subject_id: string;
+      subject_name: string;
+      mastery_pct: number;
+    } | null;
+  };
+  weak_points: { weak: number; consolidating: number };
+  class: { id: string; name: string } | null;
+  exam: { subject_name: string; days_left: number } | null;
 }

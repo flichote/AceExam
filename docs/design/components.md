@@ -44,6 +44,13 @@
 | `WarningList` | 挂科预警风险列表 | 整体风险条（高/中/低）+ 条目理由/建议/元信息；点击条目 emit select |
 | `StreakBadge` | 连胜徽章 | 🔥 N 天；variant: primary（深色底）/ light（浅色底） |
 
+## M3.5 新增组件（2026-08-08 登记，T22）
+
+| 组件 | 职责 | 关键交互 |
+|---|---|---|
+| `TtsPlayer` | AI 讲解语音播放（docs/api.md §12.1/§12.2） | 「🔊 听讲解」→ 请求 TTS → 下载音频（带 Authorization）→ createInnerAudioContext 播放；状态机 idle/loading/playing/paused/error（生成失败提示重试） |
+| `SharePoster` | 成绩单海报 canvas 生成（§12.8，D12） | 343×609 画布绘制（amber 品牌视觉），导出 uni.canvasToTempFilePath（destWidth 750）；无数据边界展示「开始第一题」引导；暴露 exportImage() |
+
 ## 组件规范约定
 
 1. **props 用 TypeScript 接口定义**，default 值必填

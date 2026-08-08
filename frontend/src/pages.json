@@ -90,6 +90,12 @@
 			"style": {
 				"navigationBarTitleText": "排行榜"
 			}
+		},
+		{
+			"path": "pages/mine/share",
+			"style": {
+				"navigationBarTitleText": "成绩单海报"
+			}
 		}
 	],
 	"tabBar": {

@@ -161,6 +161,7 @@ const menus = [
   { icon: "📕", label: "错题本", action: "wrong" },
   { icon: "🏆", label: "排行榜", action: "leaderboard" },
   { icon: "🌳", label: "知识点图谱", action: "graph" },
+  { icon: "🖼️", label: "成绩单海报", action: "share" },
   { icon: "⚙️", label: "设置", action: "settings" },
 ];
 
@@ -180,6 +181,10 @@ function onMenu(item: { label: string; action: string }) {
   if (item.action === "graph") {
     const sid = subjectStore.subjects[0]?.id || "";
     uni.navigateTo({ url: `/pages/diagnose/graph?subjectId=${encodeURIComponent(sid)}` });
+    return;
+  }
+  if (item.action === "share") {
+    uni.navigateTo({ url: "/pages/mine/share" });
     return;
   }
   uni.showToast({ title: "「设置」将在后续版本提供", icon: "none" });

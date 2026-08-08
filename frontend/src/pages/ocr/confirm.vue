@@ -59,6 +59,22 @@
         </text>
       </view>
 
+      <!-- M3.5 UGC：投稿共享题库（进审核流） -->
+      <view class="card confirm-opt">
+        <view class="confirm-opt-row" @click="shareToUgc = !shareToUgc">
+          <view class="checkbox" :class="{ 'checkbox--on': shareToUgc }">
+            <text v-if="shareToUgc" class="checkbox-mark">✓</text>
+          </view>
+          <view class="ugc-texts">
+            <text class="confirm-opt-text">提交为共享题（投稿共建公共题库）</text>
+            <text class="ugc-hint">审核通过后其他同学也能练到这道题</text>
+          </view>
+        </view>
+        <view v-if="ugcSubmitted" class="ugc-status">
+          <text class="ugc-status-text">✅ 已提交，等待审核</text>
+        </view>
+      </view>
+
       <!-- 入库按钮 -->
       <view class="foot">
         <view
@@ -66,7 +82,7 @@
           :class="{ 'btn--disabled': saving || !selectedKpId }"
           @click="save"
         >
-          <text class="save-btn-text">{{ saving ? "入库中…" : "确认入库" }}</text>
+          <text class="save-btn-text">{{ saving ? "提交中…" : shareToUgc ? "投稿共享题" : "确认入库" }}</text>
         </view>
       </view>
     </template>
@@ -80,6 +96,7 @@ import { useOcrStore } from "@/stores/ocr";
 import { useSubjectStore } from "@/stores/subject";
 import { fetchKnowledgePoints } from "@/api/subjects";
 import { confirmOcrQuestion } from "@/api/ocr";
+import { submitUgcQuestion } from "@/api/ugc";
 import type { OcrStructured, SuggestedKp } from "@/types";
 import OcrResultEditor from "@/components/OcrResultEditor.vue";
 
@@ -104,6 +121,10 @@ const rawText = ref("");
 const suggestedKps = ref<SuggestedKp[]>([]);
 const selectedKpId = ref("");
 const confirmAnswer = ref(true);
+/** M3.5 UGC：勾选后提交为共享题（走审核流，POST /questions/ugc） */
+const shareToUgc = ref(false);
+/** 投稿后的待审核状态提示 */
+const ugcSubmitted = ref(false);
 
 // 知识点列表（手动选择）
 const kpList = ref<{ id: string; name: string }[]>([]);
@@ -180,8 +201,32 @@ async function save() {
   }
   saving.value = true;
   try {
+    // 手动录入无 upload_id：生成本地占位（同 from-ocr 语义）
+    const resolvedUploadId = uploadId.value || `manual-${Date.now()}`;
+
+    if (shareToUgc.value) {
+      // M3.5 UGC 投稿：POST /questions/ugc（进审核流 status=pending）
+      const res = await submitUgcQuestion({
+        subject_id: subjectId.value,
+        knowledge_point_id: selectedKpId.value,
+        type: structured.value.type,
+        content: structured.value.content,
+        options: structured.value.options,
+        answer: structured.value.answer,
+        analysis: structured.value.analysis || undefined,
+        ocr_upload_id: manual.value ? null : resolvedUploadId,
+      });
+      ugcSubmitted.value = true;
+      uni.showToast({
+        title: res.duplicated ? "题库已有该题（未重复投稿）" : "投稿成功，等待审核 🕐",
+        icon: "none",
+      });
+      setTimeout(() => uni.navigateBack(), 900);
+      return;
+    }
+
     const res = await confirmOcrQuestion({
-      upload_id: uploadId.value || `manual-${Date.now()}`,
+      upload_id: resolvedUploadId,
       subject_id: subjectId.value,
       knowledge_point_id: selectedKpId.value,
       structured: {
@@ -200,7 +245,7 @@ async function save() {
     });
     setTimeout(() => uni.navigateBack(), 800);
   } catch (e) {
-    uni.showToast({ title: (e as Error).message || "入库失败", icon: "none" });
+    uni.showToast({ title: (e as Error).message || "提交失败", icon: "none" });
   } finally {
     saving.value = false;
   }
@@ -338,6 +383,29 @@ async function save() {
   margin-top: 8rpx;
   font-size: 22rpx;
   color: $warning-500;
+}
+
+/* M3.5 UGC 投稿 */
+.ugc-texts {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.ugc-hint {
+  margin-top: 4rpx;
+  font-size: 20rpx;
+  color: $neutral-500;
+}
+.ugc-status {
+  margin-top: 16rpx;
+  background: rgba($success-500, 0.08);
+  border-radius: $radius-tag;
+  padding: 10rpx 16rpx;
+}
+.ugc-status-text {
+  font-size: 22rpx;
+  color: $success-500;
+  font-weight: 600;
 }
 
 /* 入库按钮 */

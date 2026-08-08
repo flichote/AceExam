@@ -9,7 +9,7 @@ import { mockLeaderboard } from "@/mock/leaderboard";
  */
 
 export interface FetchLeaderboardOptions {
-  scope?: "global" | "subject";
+  scope?: "global" | "subject" | "class";
   subjectId?: string;
   page?: number;
   pageSize?: number;

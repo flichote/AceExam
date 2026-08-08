@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>AceExam App 模拟器</title>
+<style>
+  body { margin:0; background:#1a1a2e; display:flex; justify-content:center; align-items:center; min-height:100vh; font-family:sans-serif; }
+  .phone { width:390px; height:844px; background:#fff; border-radius:44px; border:10px solid #2d2d3a; overflow:hidden; position:relative; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  .notch { position:absolute; top:0; left:50%; transform:translateX(-50%); width:150px; height:28px; background:#2d2d3a; border-radius:0 0 18px 18px; z-index:10; }
+  .screen { width:100%; height:100%; border:none; display:block; }
+  .hint { color:#888; text-align:center; margin-top:16px; font-size:13px; }
+</style></head>
+<body>
+  <div>
+    <div class="phone">
+      <div class="notch"></div>
+      <iframe class="screen" src="http://localhost:5176/" frameborder="0"></iframe>
+    </div>
+    <div class="hint">📱 AceExam App 模拟视图 · 390×844 (iPhone 尺寸)</div>
+  </div>
+</body></html>
