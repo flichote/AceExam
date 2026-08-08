@@ -62,70 +62,92 @@
       </view>
     </view>
 
-    <!-- 科目卡片列表（考试科目 + 日期） -->
+    <!-- 我的课程（用户自选，GET /me/subjects，docs/api.md §13.3） -->
     <view class="section">
       <view class="section-head">
-        <text class="section-title">我的科目</text>
-        <text class="section-sub">{{ subjectCount }} 门备考中</text>
+        <text class="section-title">我的课程</text>
+        <text class="section-sub">{{ mySubjects.length }} 门本学期课程</text>
       </view>
 
       <!-- 加载中骨架屏 -->
-      <template v-if="subjectStore.loading">
+      <template v-if="mySubjectsLoading">
         <LoadingSkeleton v-for="i in 2" :key="i" />
       </template>
 
       <!-- 加载失败重试 -->
-      <view v-else-if="subjectStore.error" class="card error-card">
-        <text class="error-text">加载失败：{{ subjectStore.error }}</text>
-        <view class="btn btn--primary error-btn" @click="subjectStore.loadSubjects(true)">
+      <view v-else-if="mySubjectsError" class="card error-card">
+        <text class="error-text">加载失败：{{ mySubjectsError }}</text>
+        <view class="btn btn--primary error-btn" @click="loadMySubjects">
           <text class="btn--primary-text">重试</text>
         </view>
       </view>
 
-      <!-- 科目卡片 -->
+      <!-- 空态：未选课 → 引导去广场 -->
+      <view v-else-if="!mySubjects.length" class="card empty-card">
+        <text class="empty-icon">🧭</text>
+        <text class="empty-title">还没有本学期课程</text>
+        <text class="empty-desc">去课程广场挑选你的公共课，AceExam 会跟踪每科进度</text>
+        <view class="btn btn--primary empty-btn" @click="goPlaza">
+          <text class="btn--primary-text">去课程广场 →</text>
+        </view>
+      </view>
+
+      <!-- 课程卡片（含每科掌握度/进度） -->
       <view
-        v-for="s in subjectStore.subjects"
-        :key="s.id"
+        v-for="it in mySubjects"
+        :key="it.subject.id"
         class="card subject-card"
-        @click="goPractice(s.id)"
+        @click="goPractice(it.subject.id)"
       >
         <view class="subject-main">
           <view class="subject-left">
             <view class="subject-emoji">
-              <text class="subject-emoji-text">{{ s.emoji }}</text>
+              <text class="subject-emoji-text">{{ subjectEmoji(it.subject.id) }}</text>
             </view>
             <view class="subject-info">
               <view class="subject-name-row">
-                <text class="subject-name">{{ s.name }}</text>
-                <SubjectPill
-                  :label="statusText[s.status]"
-                  :type="statusType[s.status]"
-                />
+                <text class="subject-name">{{ it.subject.name }}</text>
+                <SubjectPill :label="statsLabel(it.stats)" :type="statsType(it.stats)" />
               </view>
               <view class="subject-meta">
-                <text class="subject-meta-text">距考试 {{ s.examCountdown }} 天</text>
+                <text class="subject-meta-text">已做 {{ it.stats.question_count }} 题</text>
                 <text class="subject-meta-dot">·</text>
-                <text class="subject-meta-text">今日 {{ s.todayTask.done }}/{{ s.todayTask.total }} 题</text>
+                <text class="subject-meta-text">正确率 {{ Math.round(it.stats.accuracy * 100) }}%</text>
               </view>
               <view class="subject-task">
                 <view class="subject-task-bar">
                   <view
                     class="subject-task-fill"
-                    :style="{ width: taskPercent(s.todayTask) + '%' }"
+                    :style="{ width: masteryPercent(it.stats.mastery) + '%' }"
                   />
+                </view>
+                <view class="subject-task-meta">
+                  <text class="subject-meta-text">掌握度 {{ masteryPercent(it.stats.mastery) }}%</text>
+                  <text v-if="it.stats.knowledge_points.weak" class="subject-weak">
+                    薄弱 {{ it.stats.knowledge_points.weak }} 个
+                  </text>
                 </view>
               </view>
             </view>
           </view>
-          <ProgressRing :percent="s.mastery.percent" :size="64" :stroke-width="5" />
+          <ProgressRing :percent="masteryPercent(it.stats.mastery)" :size="64" :stroke-width="5" />
         </view>
+      </view>
+    </view>
 
-        <view class="subject-foot">
-          <text class="subject-foot-text">已掌握 {{ s.mastery.mastered }}/{{ s.mastery.total }} 题</text>
-          <view class="btn btn--primary subject-go" @click.stop="goCreatePlan(s.id)">
-            <text class="btn--primary-text">设计划 →</text>
+    <!-- 课程广场入口卡片 -->
+    <view class="section">
+      <view class="card plaza-entry" @click="goPlaza">
+        <view class="plaza-entry-left">
+          <view class="plaza-entry-icon">
+            <text class="plaza-entry-icon-text">📚</text>
+          </view>
+          <view class="plaza-entry-texts">
+            <text class="plaza-entry-title">课程广场</text>
+            <text class="plaza-entry-desc">浏览公共课程，随时加入你的本学期课程</text>
           </view>
         </view>
+        <text class="plaza-entry-arrow">›</text>
       </view>
     </view>
 
@@ -156,9 +178,12 @@ import { computed, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { useSubjectStore } from "@/stores/subject";
 import { usePlanStore } from "@/stores/plan";
-import type { SubjectStatus, KnowledgePointHit, WarningItem, RiskLevel } from "@/types";
+import type { KnowledgePointHit, WarningItem, RiskLevel, UserSubjectItem, UserSubjectStats } from "@/types";
 import { fetchWarnings } from "@/api/warnings";
 import { fetchDashboard } from "@/api/dashboard";
+import { fetchMeSubjects } from "@/api/me";
+import { getToken } from "@/utils/request";
+import { isOnboarded } from "@/utils/onboarding";
 import LoadingSkeleton from "@/components/LoadingSkeleton.vue";
 import SubjectPill from "@/components/SubjectPill.vue";
 import ProgressRing from "@/components/ProgressRing.vue";
@@ -169,6 +194,11 @@ const subjectStore = useSubjectStore();
 const planStore = usePlanStore();
 
 const statusBarHeight = ref(20);
+
+/** 我的课程（GET /me/subjects，docs/api.md §13.3） */
+const mySubjects = ref<UserSubjectItem[]>([]);
+const mySubjectsLoading = ref(false);
+const mySubjectsError = ref("");
 
 /** 挂科预警（M3） */
 const warnings = ref<WarningItem[]>([]);
@@ -187,9 +217,62 @@ onLoad(() => {
 onShow(() => {
   subjectStore.loadSubjects();
   planStore.loadActive();
+  loadMySubjects();
   loadWarnings();
   loadStreak();
+  maybeRedirectOnboarding();
 });
+
+/** 首次使用引导：登录后未配置专业/课程 → 选课引导页（docs/api.md §13 / architecture.md §13.3） */
+function maybeRedirectOnboarding() {
+  if (!getToken() || isOnboarded()) return;
+  if (mySubjects.value.length > 0) return;
+  setTimeout(() => {
+    uni.reLaunch({ url: "/pages/onboarding/index" });
+  }, 300);
+}
+
+async function loadMySubjects() {
+  mySubjectsLoading.value = true;
+  mySubjectsError.value = "";
+  try {
+    const res = await fetchMeSubjects();
+    mySubjects.value = res.items;
+  } catch (e) {
+    mySubjectsError.value = (e as Error).message || "加载失败";
+  } finally {
+    mySubjectsLoading.value = false;
+  }
+}
+
+/** 课程 emoji 兜底（UserSubjectItem 无 emoji 字段，用 id 关键词映射） */
+function subjectEmoji(id: string): string {
+  if (id.includes("math")) return "📐";
+  if (id.includes("eng") || id.includes("english")) return "🇬🇧";
+  if (id.includes("phy")) return "⚛️";
+  if (id.includes("prob")) return "🎲";
+  if (id.includes("algebra")) return "🧮";
+  return "📘";
+}
+
+/** 掌握度（0~1）→ 0-100 */
+function masteryPercent(mastery: number): number {
+  return Math.max(0, Math.min(100, Math.round(mastery * 100)));
+}
+
+/** 每科状态徽章：按掌握度近似映射（design-system 状态映射） */
+function statsLabel(stats: UserSubjectStats): string {
+  if (stats.mastery >= 0.8) return "已掌握";
+  if (stats.mastery >= 0.4) return "待巩固";
+  if (stats.question_count > 0) return "薄弱";
+  return "未开始";
+}
+function statsType(stats: UserSubjectStats): string {
+  if (stats.mastery >= 0.8) return "success";
+  if (stats.mastery >= 0.4) return "warning";
+  if (stats.question_count > 0) return "danger";
+  return "cramming";
+}
 
 async function loadWarnings() {
   try {
@@ -204,21 +287,6 @@ async function loadWarnings() {
   }
 }
 
-/** 状态 → 徽章文案 / 类型（docs/design/design-system.md 状态映射） */
-const statusText: Record<SubjectStatus, string> = {
-  mastered: "已掌握",
-  weak: "薄弱",
-  consolidating: "待巩固",
-  cramming: "突击中",
-};
-const statusType: Record<SubjectStatus, string> = {
-  mastered: "success",
-  weak: "danger",
-  consolidating: "warning",
-  cramming: "cramming",
-};
-
-const subjectCount = computed(() => subjectStore.subjects.length);
 const maxStreak = computed(() => {
   if (dashboardStreak.value > 0) return dashboardStreak.value;
   return subjectStore.subjects.reduce((max, s) => Math.max(max, s.streak), 0);
@@ -241,10 +309,6 @@ const weakKps = computed<KnowledgePointHit[]>(() => {
   return all.slice(0, 3);
 });
 
-function taskPercent(task: { done: number; total: number }) {
-  return task.total ? Math.round((task.done / task.total) * 100) : 0;
-}
-
 const greeting = computed(() => {
   const h = new Date().getHours();
   if (h < 6) return "夜深了";
@@ -259,15 +323,20 @@ function goPractice(subjectId: string) {
   uni.switchTab({ url: "/pages/practice/index" });
 }
 
+/** 课程广场 */
+function goPlaza() {
+  uni.navigateTo({ url: "/pages/plaza/index" });
+}
+
 function goPracticeByKp(kp: KnowledgePointHit) {
-  const sid = planStore.plan?.subject_id || subjectStore.subjects[0]?.id;
+  const sid = planStore.plan?.subject_id || mySubjects.value[0]?.subject.id || subjectStore.subjects[0]?.id;
   if (sid) subjectStore.selectSubject(sid);
   uni.switchTab({ url: "/pages/practice/index" });
 }
 
 /** 预警条目 → 对应知识点练习 */
 function goWarningPractice(w: WarningItem) {
-  const sid = planStore.plan?.subject_id || subjectStore.subjects[0]?.id;
+  const sid = planStore.plan?.subject_id || mySubjects.value[0]?.subject.id || subjectStore.subjects[0]?.id;
   if (sid) subjectStore.selectSubject(sid);
   uni.switchTab({
     url: `/pages/practice/index?subjectId=${encodeURIComponent(sid || "")}&kpId=${encodeURIComponent(w.knowledge_point_id)}`,
@@ -490,21 +559,6 @@ function onCheckin() {
   transition: width 400ms ease-out;
 }
 
-.subject-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 20rpx;
-  padding-top: 20rpx;
-  border-top: 2rpx solid $neutral-100;
-}
-.subject-foot-text {
-  font-size: $font-aux;
-  color: $neutral-500;
-}
-.subject-go {
-  padding: 12rpx 32rpx;
-}
 .btn--primary-text {
   color: #ffffff;
   font-size: $font-body;
@@ -552,6 +606,89 @@ function onCheckin() {
 .ai-entry-arrow {
   font-size: 44rpx;
   color: $neutral-300;
+}
+
+/* 我的课程空态 */
+.empty-card {
+  padding: 48rpx 32rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.empty-icon {
+  font-size: 56rpx;
+}
+.empty-title {
+  font-size: $font-body;
+  font-weight: 700;
+  color: $neutral-900;
+  margin-top: 16rpx;
+}
+.empty-desc {
+  font-size: 22rpx;
+  color: $neutral-500;
+  margin-top: 8rpx;
+  line-height: 1.6;
+}
+.empty-btn {
+  margin-top: 24rpx;
+  padding: 14rpx 40rpx;
+}
+
+/* 课程广场入口 */
+.plaza-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 28rpx;
+}
+.plaza-entry-left {
+  display: flex;
+  align-items: center;
+}
+.plaza-entry-icon {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 24rpx;
+  background: linear-gradient(135deg, $primary-500, $primary-600);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 20rpx;
+}
+.plaza-entry-icon-text {
+  font-size: 40rpx;
+}
+.plaza-entry-texts {
+  display: flex;
+  flex-direction: column;
+}
+.plaza-entry-title {
+  font-size: $font-card-title;
+  font-weight: 700;
+  color: $neutral-900;
+}
+.plaza-entry-desc {
+  font-size: $font-aux;
+  color: $neutral-500;
+  margin-top: 2rpx;
+}
+.plaza-entry-arrow {
+  font-size: 44rpx;
+  color: $neutral-300;
+}
+
+/* 课程卡片内掌握度行 */
+.subject-task-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6rpx;
+}
+.subject-weak {
+  font-size: 20rpx;
+  color: $danger-500;
 }
 
 /* 错误态 */

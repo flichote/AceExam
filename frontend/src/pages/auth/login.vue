@@ -46,6 +46,9 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useAuthStore } from "@/stores/auth";
+import { fetchMe } from "@/api/auth";
+import { fetchMeSubjects } from "@/api/me";
+import { isOnboarded } from "@/utils/onboarding";
 
 const auth = useAuthStore();
 const username = ref("zhangsan");
@@ -56,9 +59,27 @@ async function onLogin() {
   const ok = await auth.login(username.value.trim(), password.value);
   if (!ok) return;
   uni.showToast({ title: "登录成功 🎉", icon: "none" });
+  // 首次使用：未配置专业/课程 → 选课引导（docs/api.md §13 / architecture.md §13.3）
+  const needsOnboarding = await checkNeedsOnboarding();
   setTimeout(() => {
-    uni.navigateBack();
+    if (needsOnboarding) {
+      uni.reLaunch({ url: "/pages/onboarding/index" });
+    } else {
+      uni.navigateBack();
+    }
   }, 600);
+}
+
+/** 登录后判断：major 为空 或 未选课 → 引导页；否则直接返回 */
+async function checkNeedsOnboarding(): Promise<boolean> {
+  if (isOnboarded()) return false;
+  try {
+    const [me, subjects] = await Promise.all([fetchMe(), fetchMeSubjects()]);
+    const hasMajor = !!me.major?.trim();
+    return !hasMajor && subjects.total === 0;
+  } catch {
+    return false;
+  }
 }
 </script>
 

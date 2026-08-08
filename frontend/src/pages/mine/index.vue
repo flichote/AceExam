@@ -12,7 +12,9 @@
             <text class="profile-badge-text">{{ authStore.isMember ? "会员版" : "免费版" }}</text>
           </view>
         </view>
-        <text class="profile-sub">距考试最近：{{ nearestExam }}</text>
+        <text class="profile-sub">
+          {{ authStore.user?.major ? `专业：${authStore.user.major}` : "尚未填写专业" }}
+        </text>
       </view>
       <StreakBadge v-if="dashboard && dashboard.streak.current > 0" :days="dashboard.streak.current" variant="primary" />
     </view>
@@ -107,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { useSubjectStore } from "@/stores/subject";
 import { useAuthStore } from "@/stores/auth";
@@ -149,14 +151,8 @@ async function loadDashboard() {
   }
 }
 
-const nearestExam = computed(() => {
-  const list = subjectStore.subjects;
-  if (!list.length) return "--";
-  const nearest = list.reduce((min, s) => (s.examCountdown < min.examCountdown ? s : min));
-  return `${nearest.name} ${nearest.examCountdown} 天`;
-});
-
 const menus = [
+  { icon: "🎓", label: "专业与课程", action: "profile" },
   { icon: "🗓️", label: "备考计划", action: "plan" },
   { icon: "📕", label: "错题本", action: "wrong" },
   { icon: "🏆", label: "排行榜", action: "leaderboard" },
@@ -166,6 +162,10 @@ const menus = [
 ];
 
 function onMenu(item: { label: string; action: string }) {
+  if (item.action === "profile") {
+    uni.navigateTo({ url: "/pages/onboarding/index" });
+    return;
+  }
   if (item.action === "plan") {
     uni.navigateTo({ url: "/pages/plan/create" });
     return;

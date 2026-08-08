@@ -1,17 +1,26 @@
-import type { Subject, KnowledgePointHit } from "@/types";
+import type { Subject, KnowledgePointHit, PlazaResponse } from "@/types";
 import { request, withFallback } from "@/utils/request";
-import { mockSubjects } from "@/mock/subjects";
+import { mockSubjects, mockPlaza } from "@/mock/subjects";
 
 /**
- * 科目 API（docs/api.md §2）
+ * 科目 API（docs/api.md §2 / §13.4）
  *  - GET /subjects（公开）
  *  - GET /subjects/{subject_id}/knowledge-points（知识点列表，刷题页标签映射用）
+ *  - GET /subjects/plaza（课程广场，游客白名单：未登录 joined=false）
  */
 
 export async function fetchSubjects(): Promise<Subject[]> {
   return withFallback(
     () => request<Subject[]>({ url: "/subjects", method: "GET", auth: false }),
     () => mockSubjects()
+  );
+}
+
+/** 课程广场（§13.4）：is_public=true 的公共课 + 当前用户 joined 状态 */
+export async function fetchPlazaSubjects(): Promise<PlazaResponse> {
+  return withFallback(
+    () => request<PlazaResponse>({ url: "/subjects/plaza", method: "GET", auth: false }),
+    () => mockPlaza()
   );
 }
 

@@ -24,6 +24,7 @@ export async function login(username: string, password: string): Promise<LoginRe
       user: {
         id: "mock-user",
         username,
+        major: "计算机科学与技术",
         role: "student",
         is_member: false,
         member_expires_at: null,
@@ -41,6 +42,7 @@ export async function fetchMe(): Promise<UserProfile> {
     () => ({
       id: "mock-user",
       username: "期末选手",
+      major: "计算机科学与技术",
       role: "student",
       is_member: false,
       member_expires_at: null,

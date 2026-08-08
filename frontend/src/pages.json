@@ -96,6 +96,19 @@
 			"style": {
 				"navigationBarTitleText": "成绩单海报"
 			}
+		},
+		{
+			"path": "pages/onboarding/index",
+			"style": {
+				"navigationBarTitleText": "选课引导",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/plaza/index",
+			"style": {
+				"navigationBarTitleText": "课程广场"
+			}
 		}
 	],
 	"tabBar": {

@@ -282,6 +282,8 @@ export interface CheckinResult {
 export interface UserProfile {
   id: string;
   username: string;
+  /** 专业（自由文本，可选；docs/api.md §13.1 UserPublic 扩展） */
+  major?: string | null;
   role: string;
   is_member: boolean;
   member_expires_at: string | null;
@@ -543,4 +545,68 @@ export interface ShareCardData {
   weak_points: { weak: number; consolidating: number };
   class: { id: string; name: string } | null;
   exam: { subject_name: string; days_left: number } | null;
+}
+
+/* ===== M4 专业选课 / 课程广场（docs/api.md §13）===== */
+
+/** 课程广场条目（§13.4 GET /subjects/plaza） */
+export interface PlazaSubject {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  is_public: boolean;
+  is_active: boolean;
+  /** 当前登录用户是否已加入；未登录恒 false */
+  joined: boolean;
+  /** 公共题库量（status=active 计数；0 = 建设中，前端降级展示） */
+  question_count: number;
+}
+
+export interface PlazaResponse {
+  items: PlazaSubject[];
+  total: number;
+}
+
+/** 用户自选课程（§13.3 UserSubjectItem 内嵌 subject 摘要） */
+export interface UserSubjectBrief {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  is_public: boolean;
+  is_active: boolean;
+}
+
+/** 每科学习状态实时聚合（§13.3 stats） */
+export interface UserSubjectStats {
+  question_count: number;
+  correct_count: number;
+  /** 0~1 */
+  accuracy: number;
+  /** 0~1 掌握度（口径沿用 §11.4 dashboard） */
+  mastery: number;
+  knowledge_points: {
+    total: number;
+    mastered: number;
+    weak: number;
+  };
+  streak: number;
+}
+
+/** GET /me/subjects 条目（§13.3） */
+export interface UserSubjectItem {
+  subject: UserSubjectBrief;
+  joined_at: string;
+  stats: UserSubjectStats;
+}
+
+export interface MeSubjectsResponse {
+  items: UserSubjectItem[];
+  total: number;
+}
+
+/** PUT /me/profile 请求体（§13.1） */
+export interface ProfileUpdate {
+  major: string;
 }
