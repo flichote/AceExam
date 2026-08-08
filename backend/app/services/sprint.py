@@ -167,14 +167,25 @@ async def generate_sprint_questions(
     # Return cached snapshot if available
     if sprint.question_snapshot:
         snap = sprint.question_snapshot
-        # Check if snapshot items still exist
-        item_ids = [uuid.UUID(i["id"]) for i in snap.get("items", [])]
-        q_check = await db.execute(
-            select(Question).where(Question.id.in_(item_ids))
-        )
-        alive_ids = {q.id for q in q_check.scalars().all()}
-        if len(alive_ids) >= len(item_ids) * 0.8:  # at least 80% alive → reuse
-            return snap
+        # 快照必须是 dict（{"items": [...], "sprint_id": ...}）才可复用；
+        # 旧版本遗留的 list 快照（[{id, tag}, ...]）结构不完整，直接丢弃重新生成。
+        if isinstance(snap, dict):
+            snap_items = snap.get("items", [])
+            # Check if snapshot items still exist
+            item_ids = [uuid.UUID(i["id"]) for i in snap_items if isinstance(i, dict) and i.get("id")]
+            if not item_ids:
+                # 快照为空或结构异常 → 视为无缓存，重新生成
+                sprint.question_snapshot = None
+            else:
+                q_check = await db.execute(
+                    select(Question).where(Question.id.in_(item_ids))
+                )
+                alive_ids = {q.id for q in q_check.scalars().all()}
+                if len(alive_ids) >= len(item_ids) * 0.8:  # at least 80% alive → reuse
+                    return snap
+        else:
+            # 旧 list 格式：丢弃，走重新生成（下方统一写 dict）
+            sprint.question_snapshot = None
 
     subject_id = sprint.subject_id
     user_id = sprint.user_id
