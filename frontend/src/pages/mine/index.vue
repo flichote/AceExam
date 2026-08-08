@@ -96,7 +96,7 @@
       <view class="card menu">
         <view v-for="item in menus" :key="item.label" class="menu-item" @click="onMenu(item)">
           <text class="menu-icon">{{ item.icon }}</text>
-          <text class="menu-label">{{ item.label }}</text>
+          <text class="menu-label" :class="{ 'menu-label--danger': item.danger }">{{ item.label }}</text>
           <text class="menu-arrow">›</text>
         </view>
       </view>
@@ -159,6 +159,7 @@ const menus = [
   { icon: "🌳", label: "知识点图谱", action: "graph" },
   { icon: "🖼️", label: "成绩单海报", action: "share" },
   { icon: "⚙️", label: "设置", action: "settings" },
+  { icon: "🚪", label: "退出登录", action: "logout", danger: true },
 ];
 
 function onMenu(item: { label: string; action: string }) {
@@ -185,6 +186,24 @@ function onMenu(item: { label: string; action: string }) {
   }
   if (item.action === "share") {
     uni.navigateTo({ url: "/pages/mine/share" });
+    return;
+  }
+  if (item.action === "logout") {
+    uni.showModal({
+      title: "退出登录",
+      content: "确定要退出当前账号吗？",
+      confirmText: "退出",
+      confirmColor: "#EF4444",
+      success: (res) => {
+        if (res.confirm) {
+          authStore.logout();
+          uni.showToast({ title: "已退出登录", icon: "success" });
+          setTimeout(() => {
+            uni.reLaunch({ url: "/pages/auth/login" });
+          }, 600);
+        }
+      },
+    });
     return;
   }
   uni.showToast({ title: "「设置」将在后续版本提供", icon: "none" });
@@ -406,6 +425,9 @@ function goLogin() {
   flex: 1;
   font-size: $font-body;
   color: $neutral-900;
+}
+.menu-label--danger {
+  color: $danger-500;
 }
 .menu-arrow {
   font-size: 40rpx;
