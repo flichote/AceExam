@@ -1092,7 +1092,7 @@ def seed(database_url: str, reset: bool = False) -> None:
                     total_kp += 1
 
             for q_order, (kp_name, qtype, content, options, answer, analysis, difficulty) in enumerate(
-                subject_spec["questions"], start=1
+                subject_spec.get("questions", []), start=1
             ):
                 kp = kp_map.get(kp_name)
                 if kp is None:
