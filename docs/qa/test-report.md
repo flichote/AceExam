@@ -674,10 +674,8 @@ PYTHONPATH= .venv/Scripts/python.exe -m pytest -q
 ```
 
 - 唯一 failed：`tests/test_config.py::test_default_database_url` —— **预存环境性**（本地 `.env` 配置 `DATABASE_URL` 覆盖默认 PG 串；M3/M3.5/M4 报告同项，与 M5 改动无关）。
-- **D-29 XPASS 确认修复**：`test_m4_plaza_acceptance.py::TestIdempotentOverwrite::test_overwrite_replaces_not_merges` 由 xfail 转 XPASS —— T30（a7e1976）在 `set_my_subjects` 增加先删后插 `await db.flush()`，M4 遗留 P1 缺陷已修复。
-- **测试基础设施硬化（T33）**：
-  - `test_m35_api.py::test_share_card_streak_only` 与 `test_m4_plaza_acceptance.py::test_stats_aggregation_values` 的 `_d()` 播种由本地 `date.today()` 改为 UTC 口径（`datetime.now(timezone.utc).date()`），消除本地 00:00~08:00 时区窗口必败（D-35，见 §29）。
-  - 沿用 run-44 遗留的 pytest 配置（`asyncio_default_fixture_loop_scope=session`）与 conftest Windows 文件清理重试，全量 640 passed 稳定通过。
+- **D-29 / D-26 XPASS 确认修复**：`test_m4_plaza_acceptance.py::TestIdempotentOverwrite::test_overwrite_replaces_not_merges`（M4 P1 幂等覆盖 UNIQUE 冲突）由 xfail 转 XPASS —— T30（a7e1976）在 `set_my_subjects` 增加先删后插 `await db.flush()`；`test_m35_api.py::TestShareCard::test_share_card_mastery_and_weak`、`test_share_card_exam_days_left`（M3.5 P1 share-card 500）同样转 XPASS —— `me.py` 模块级 `Subject` 导入在 T30 之前已补齐（本卡全量回归再次确认，修复归因见 me.py 历史）。
+- **测试基础设施硬化（T33）**：`test_m35_api.py::test_share_card_streak_only` 与 `test_m4_plaza_acceptance.py::test_stats_aggregation_values` 的 `_d()` 播种由本地 `date.today()` 改为 UTC 口径（`datetime.now(timezone.utc).date()`），消除本地 00:00~08:00 时区窗口必败（D-35，见 §29）。全量回归在**未含 run-44 临时 pytest 配置**的原始 conftest/pyproject 下同样 640 passed 稳定通过。
 - 主链路回归：subjects / user_subjects / questions / practice / auth / wrong-answers / chat 等全部通过，**无 M5 相关回归**。
 
 ### 27.3 运行方式（复现）
