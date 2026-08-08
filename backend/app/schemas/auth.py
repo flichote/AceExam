@@ -20,5 +20,6 @@ class TokenResponse(BaseModel):
 class UserResponse(BaseModel):
     id: str
     username: str
+    major: str | None = None
     is_member: bool
     is_active: bool

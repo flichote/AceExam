@@ -43,6 +43,7 @@ async def me(current_user: User = Depends(get_current_user)):
     return UserResponse(
         id=str(current_user.id),
         username=current_user.username,
+        major=current_user.major,
         is_member=current_user.is_member,
         is_active=True,
     )

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.db.models import Class, Plan, Question, StudySession, User, UserKnowledgeState
+from app.db.models import Class, Plan, Question, StudySession, Subject, User, UserKnowledgeState, UserSubject
 from app.schemas.classroom import (
     ClassCreateRequest,
     ClassInfo,
@@ -26,6 +26,17 @@ from app.schemas.share_card import (
     ShareCardStreak,
     ShareCardTotals,
     ShareCardWeakPoints,
+)
+from app.schemas.auth import UserResponse
+from app.schemas.me import (
+    PlazaListResponse,
+    PlazaSubject,
+    ProfileUpdate,
+    SubjectBrief,
+    SubjectIdsUpdate,
+    SubjectStats,
+    UserSubjectItem,
+    UserSubjectListResponse,
 )
 from app.services.streak import compute_streak
 
@@ -296,3 +307,206 @@ async def get_share_card(
         class_=class_info,
         exam=exam_info,
     )
+
+
+# ── M4 专业选课 / 课程广场 ──
+
+
+@router.put("/profile", response_model=UserResponse)
+async def update_profile(
+    body: ProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """PUT /me/profile：更新专业（api.md §13.1）。
+
+    major 为自由文本 1..100，允许置空（None 或 "" 均表示清除）。
+    """
+    major_val = body.major
+    # None 和 "" 均视为清除
+    if major_val is not None:
+        major_val = major_val.strip()
+        if major_val == "":
+            major_val = None
+    user.major = major_val
+    await db.commit()
+    await db.refresh(user)
+    return UserResponse(
+        id=str(user.id),
+        username=user.username,
+        major=user.major,
+        is_member=user.is_member,
+        is_active=True,
+    )
+
+
+@router.put("/subjects", response_model=UserSubjectListResponse)
+async def set_my_subjects(
+    body: SubjectIdsUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """PUT /me/subjects：幂等全量覆盖本学期课程列表（api.md §13.2）。"""
+    import uuid as _uuid
+
+    # 去重 + 验证
+    raw_ids = list(dict.fromkeys(body.subject_ids))  # 保序去重
+
+    if raw_ids:
+        # 验证 subject 是否可加入（is_active=True 且存在；不做 is_public 硬校验，留弹性）
+        subj_res = await db.execute(
+            select(Subject).where(Subject.id.in_(raw_ids), Subject.is_active == True)
+        )
+        valid_subjects = {str(s.id) for s in subj_res.scalars().all()}
+        invalid = [sid for sid in raw_ids if sid not in valid_subjects]
+        if invalid:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "SUBJECT_NOT_JOINABLE",
+                    "message": "Some subject_ids are not joinable",
+                    "invalid_ids": invalid,
+                },
+            )
+
+    # 幂等全量覆盖：先删后插（同事务）
+    existing = await db.execute(
+        select(UserSubject).where(UserSubject.user_id == user.id)
+    )
+    for us in existing.scalars().all():
+        await db.delete(us)
+
+    # 按数组顺序插入（第 1 个最早）
+    now = datetime.now(timezone.utc)
+    for i, sid in enumerate(raw_ids):
+        us = UserSubject(
+            user_id=user.id,
+            subject_id=_uuid.UUID(sid),
+            created_at=now + timedelta(microseconds=i),  # 微秒级偏移保持顺序
+        )
+        db.add(us)
+
+    await db.commit()
+
+    # 返回同构 GET /me/subjects
+    return await _build_user_subjects_response(db, user)
+
+
+@router.get("/subjects", response_model=UserSubjectListResponse)
+async def get_my_subjects(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """GET /me/subjects：用户自选课程列表（含学习状态，api.md §13.3）。"""
+    return await _build_user_subjects_response(db, user)
+
+
+async def _build_user_subjects_response(db: AsyncSession, user: User) -> UserSubjectListResponse:
+    """构建用户课程列表响应（聚合学习统计）。"""
+    import uuid as _uuid
+
+    # 查询用户选课记录（按 created_at 升序）
+    us_result = await db.execute(
+        select(UserSubject, Subject)
+        .join(Subject, UserSubject.subject_id == Subject.id)
+        .where(UserSubject.user_id == user.id)
+        .order_by(UserSubject.created_at.asc())
+    )
+    rows = us_result.all()
+
+    if not rows:
+        return UserSubjectListResponse(items=[], total=0)
+
+    items: list[UserSubjectItem] = []
+    subject_ids = [str(row.Subject.id) for row in rows]
+
+    # 批量聚合学习统计
+    # question_count / correct_count（从 study_sessions）
+    ss_result = await db.execute(
+        select(
+            StudySession.subject_id,
+            func.sum(StudySession.questions_practiced),
+            func.sum(StudySession.correct_count),
+        )
+        .where(
+            StudySession.user_id == user.id,
+            StudySession.subject_id.in_(subject_ids),
+        )
+        .group_by(StudySession.subject_id)
+    )
+    ss_map: dict[str, tuple[int, int]] = {}
+    for row in ss_result.all():
+        ss_map[str(row[0])] = (int(row[1] or 0), int(row[2] or 0))
+
+    # mastery / knowledge_points（从 user_knowledge_states）
+    ks_result = await db.execute(
+        select(
+            UserKnowledgeState.subject_id,
+            func.count(),
+            func.sum(case((UserKnowledgeState.status == "mastered", 1), else_=0)),
+            func.sum(case((UserKnowledgeState.status == "weak", 1), else_=0)),
+        )
+        .where(
+            UserKnowledgeState.user_id == user.id,
+            UserKnowledgeState.subject_id.in_(subject_ids),
+        )
+        .group_by(UserKnowledgeState.subject_id)
+    )
+    ks_map: dict[str, tuple[int, int, int]] = {}
+    for row in ks_result.all():
+        ks_map[str(row[0])] = (int(row[1] or 0), int(row[2] or 0), int(row[3] or 0))
+
+    # streak（从 checked_in 天数）
+    streak_res = await db.execute(
+        select(StudySession.subject_id, StudySession.session_date)
+        .where(
+            StudySession.user_id == user.id,
+            StudySession.subject_id.in_(subject_ids),
+            StudySession.checked_in == True,
+        )
+        .order_by(StudySession.subject_id, StudySession.session_date.asc())
+    )
+    streak_data: dict[str, list] = {}
+    for row in streak_res.all():
+        sid = str(row[0])
+        if sid not in streak_data:
+            streak_data[sid] = []
+        streak_data[sid].append(row[1])
+
+    for us_row, subj in rows:
+        sid = str(subj.id)
+        qp, correct = ss_map.get(sid, (0, 0))
+        total_kp, mastered_kp, weak_kp = ks_map.get(sid, (0, 0, 0))
+        accuracy = round(correct / qp, 3) if qp > 0 else 0.0
+        mastery = round(mastered_kp / total_kp, 3) if total_kp > 0 else 0.0
+        streak = 0
+        if sid in streak_data:
+            streak, _ = compute_streak(streak_data[sid], today=datetime.now(timezone.utc).date())
+
+        items.append(
+            UserSubjectItem(
+                subject=SubjectBrief(
+                    id=sid,
+                    code=subj.code,
+                    name=subj.name,
+                    description=subj.description,
+                    is_public=subj.is_public,
+                    is_active=subj.is_active,
+                ),
+                joined_at=us_row.created_at,
+                stats=SubjectStats(
+                    question_count=qp,
+                    correct_count=correct,
+                    accuracy=accuracy,
+                    mastery=mastery,
+                    knowledge_points={
+                        "total": total_kp,
+                        "mastered": mastered_kp,
+                        "weak": weak_kp,
+                    },
+                    streak=streak,
+                ),
+            )
+        )
+
+    return UserSubjectListResponse(items=items, total=len(items))

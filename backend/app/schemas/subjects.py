@@ -15,6 +15,7 @@ class SubjectResponse(BaseModel):
     name: str
     description: str | None = None
     is_active: bool
+    is_public: bool = False
     sort_order: int
     config: dict | None = None
 

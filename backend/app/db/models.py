@@ -48,6 +48,7 @@ class User(Base):
     class_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("classes.id", use_alter=True), nullable=True, index=True
     )
+    major: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)  # M4：专业（自由文本）
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
@@ -62,6 +63,7 @@ class Subject(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # M4：课程广场公共课
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
@@ -422,3 +424,23 @@ class TextbookUpload(Base):
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class UserSubject(Base):
+    """用户自选课程关联表（M4 新表，架构 §13 / D16）。
+
+    多对多，幂等全量覆盖 PUT /me/subjects。
+    按 created_at 升序返回，与勾选顺序一致。
+    """
+
+    __tablename__ = "user_subjects"
+    __table_args__ = (
+        UniqueConstraint("user_id", "subject_id", name="uq_us_user_subject"),
+        Index("ix_us_user_id", "user_id"),
+        Index("ix_us_subject_id", "subject_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subjects.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
