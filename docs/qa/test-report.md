@@ -639,3 +639,118 @@ PYTHONPATH= .venv/Scripts/python.exe -m alembic upgrade head --sql
 - **用例**：`test_m4_plaza_acceptance.py::TestIdempotentOverwrite::test_overwrite_replaces_not_merges`（**xfail 固化**；ep-backend 修复后自动 XPASS）。
 - **建议修复**：`set_my_subjects` 删除后 `await db.flush()` 再插入，或在同一事务用 `delete(UserSubject).where(user_id==...)` 执行删除。
 
+---
+
+## 26. M5 测试范围与新增用例
+
+> 关联任务：T33 M5 验收测试（kanban t_f8cb7781）
+> 依赖交付：T29 db 51acca6、T30 backend a7e1976、T31 ai 6b94455、T32 frontend 1ec16b2
+> 契约来源：docs/api.md §14（14.1~14.5）、docs/architecture.md §14（D19~D22）、docs/database.md §12
+
+| 文件 | 用例数 | 覆盖 |
+|---|---|---|
+| `tests/test_m5_api.py`（T30 交付） | 24 passed | 基础路径：aliases 401/空库、match mock/未知/422、me/courses 手动建/重复/模板 404/列表、ugc upload 422/201/404/skip、ugc status 401/空/过滤 |
+| `tests/test_ai_course_matcher.py`（T31 交付） | 23 passed | 归一化、别名命中、AI 语义匹配（mock LLM）、JSON 解析健壮性、降级回退 |
+| `tests/test_ai_ugc_review.py`（T31 交付） | 35 passed | ugc_review 服务：verdict/confidence/reasons、规则抽检、mock LLM 边界 |
+| `tests/test_m5_acceptance.py`（T33 新增） | **58 passed + 4 xfailed** | 表结构（alias UNIQUE/template FK/默认值/CHECK）、match 别名精确命中 + AI 阈值边界（0.85/0.60/0.59）+ 候选降序（D-33 xfail）、me/courses 模板映射 + school 实例 + 幂等 409、别名沉淀（D-34 xfail×2）、aliases 联想（q/is_verified/limit/template 过滤）、UGC 预检 + pass/flag 分流 + 自动放行 active + subject_id 模板解析、status 查询（本人/过滤/前缀反解/admin reject）、ai_review 透传（D-36 xfail） |
+
+**T33 新增 62 用例（58 passed + 4 xfailed）**；M5 专项合计 **140 passed + 4 xfailed**（24+23+35+58）。
+
+## 27. 执行结果（M5 实测）
+
+### 27.1 M5 专项套件
+
+```bash
+cd backend
+PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m5_api.py tests/test_m5_acceptance.py tests/test_ai_course_matcher.py tests/test_ai_ugc_review.py -q
+→ 140 passed, 4 xfailed in 132.59s
+```
+
+### 27.2 后端 pytest 全量回归
+
+```bash
+PYTHONPATH= .venv/Scripts/python.exe -m pytest -q
+→ 640 passed, 3 skipped, 13 xfailed, 10 xpassed, 1 failed in 614.68s
+```
+
+- 唯一 failed：`tests/test_config.py::test_default_database_url` —— **预存环境性**（本地 `.env` 配置 `DATABASE_URL` 覆盖默认 PG 串；M3/M3.5/M4 报告同项，与 M5 改动无关）。
+- **D-29 XPASS 确认修复**：`test_m4_plaza_acceptance.py::TestIdempotentOverwrite::test_overwrite_replaces_not_merges` 由 xfail 转 XPASS —— T30（a7e1976）在 `set_my_subjects` 增加先删后插 `await db.flush()`，M4 遗留 P1 缺陷已修复。
+- **测试基础设施硬化（T33）**：
+  - `test_m35_api.py::test_share_card_streak_only` 与 `test_m4_plaza_acceptance.py::test_stats_aggregation_values` 的 `_d()` 播种由本地 `date.today()` 改为 UTC 口径（`datetime.now(timezone.utc).date()`），消除本地 00:00~08:00 时区窗口必败（D-35，见 §29）。
+  - 沿用 run-44 遗留的 pytest 配置（`asyncio_default_fixture_loop_scope=session`）与 conftest Windows 文件清理重试，全量 640 passed 稳定通过。
+- 主链路回归：subjects / user_subjects / questions / practice / auth / wrong-answers / chat 等全部通过，**无 M5 相关回归**。
+
+### 27.3 运行方式（复现）
+
+```bash
+cd backend
+PYTHONPATH= .venv/Scripts/python.exe -m pytest tests/test_m5_acceptance.py -q    # T33 新增
+PYTHONPATH= .venv/Scripts/python.exe -m pytest -q                                 # 全量
+```
+
+## 28. M5 验收点清单（对照 api.md §14）
+
+| 验收点 | 状态 | 说明 |
+|---|---|---|
+| 14.1 GET /courses/aliases 未登录 401 | ✅ 通过 | T33 |
+| 14.1 无 q 返回 verified 别名、有 q 时 ILIKE 匹配 + is_verified 优先 | ✅ 通过 | T33：verified-only 2 条；q=高数 → verified 在前；`limit` ≤20（21 → 422）；`template_subject_id` 过滤 + 非法 uuid 400 |
+| 14.2 POST /courses/match 别名精确命中 | ✅ 通过 | 归一化后命中 verified 别名 → `strategy=alias`、`confidence=1.0`、单候选、`source=alias`；unverified 别名不命中（走 AI） |
+| 14.2 未命中走 AI（mock LLM） | ✅ 通过 | strategy=ai；高等数学A → 0.92、高等数学 → 0.88、概率论 → 0.80；未知课程 → matched=false |
+| 14.2 阈值边界（D21） | ✅ 通过 | monkeypatch 注入：0.85 → matched=true；0.60 → matched=true；0.59 → matched=false |
+| 14.2 候选按 confidence 降序 | ⚠️ 缺陷 | **D-33 xfail**：路由透传上游顺序不重排（契约要求降序；当前依赖 T31 服务排序） |
+| 14.2 name 归一化（学期/年份/括号/空白） | ✅ 通过 | `2026春 高等数学A（上）` → 命中 `高等数学a` 别名；name 空/超长 → 422 |
+| 14.3 POST /me/courses 映射模板 | ✅ 通过 | `template_subject_id` 写入 user_subjects；无同名 school 行 → 直接挂模板；已存在同名 school 行 → 复用（subject_id=校本行, template_subject_id=模板）；模板不存在/不活跃 404、非法 uuid 400 |
+| 14.3 手动建 school 实例 | ✅ 通过 | template NULL → `subjects` 插入 level='school' 行（code `school_<hash>`、is_public=false）、user_subjects.template_subject_id=NULL、matched=false |
+| 14.3 幂等 409 ALREADY_EXISTS | ✅ 通过 | 同用户同 subject_id 二次提交 → 409（模板路径 + school 路径）；不同用户同校名复用同一 school 行（仅新增各自关联） |
+| 14.3 命中沉淀 alias（架构 §14.2 飞轮） | ❌ 缺陷 | **D-34 xfail×2**：AI 匹配/模板映射后不沉淀 `source='ai'` 别名（course_aliases 仅 seed 写入） |
+| 14.4 POST /ugc/upload 规则预检 | ✅ 通过 | content<15 → 422；answer 不在 options → 422；content_hash 去重 → 409 DUPLICATE（带既有 question_id）；subject/kp 不存在 → 404 |
+| 14.4 AI 初审 pass → pending | ✅ 通过 | mock pass（conf=0.9）+ 默认 subject 配置 → status=pending、ai_review.verdict=pass |
+| 14.4 自动放行 active（D22） | ✅ 通过 | `subjects.config.ugc_ai_auto_approve=true` + pass + conf≥0.9 → 直接 active（DB 校验 status/reject_reason） |
+| 14.4 AI flag → pending + 预填理由 | ✅ 通过（契约口径） | 无答案 → AI flag → status=pending + reject_reason `[AI:flag] 无答案`；**任务 body 所述「AI reject → rejected」与 D22 冲突**，实现按 D22「AI 只预筛不终审」：AI 不终审，人工 admin reject 才置 rejected（回归通过，见下） |
+| 14.4 subject_id 解析（school → 模板） | ✅ 通过 | 投稿传 school 实例 id → 按 user_subjects.template_subject_id 解析为模板课程落库（question.subject_id=模板） |
+| 14.5 GET /ugc/status 仅本人 | ✅ 通过 | 另一用户查不到 |
+| 14.5 status 过滤 / 分页 / 内容截断 | ✅ 通过 | pending 过滤、admin reject 后 rejected 可查、content 50 字截断 |
+| 14.5 ai_review 透传 | ⚠️ 缺陷 | **D-36 xfail**：pass→pending 投稿 ai_review=null（pass 结果未持久化，契约示例要求透传） |
+| 回归：M1~M4 全量不破 | ✅ 通过 | 640 passed / 3 skipped / 13 xfailed / 10 xpassed / 1 failed（test_config 预存环境性）；**D-29 XPASS 确认修复** |
+
+## 29. M5 缺陷记录（新增）
+
+### D-33 [P3] POST /courses/match AI 候选未在 API 层按 confidence 降序
+- **现象**：monkeypatch 注入乱序候选 `[0.6, 0.88]`，响应原样返回（未降序）。契约 api.md §14.2 要求「候选按 confidence 降序」。
+- **根因**：`courses.py::match_course` 遍历 AI 结果不重排；排序仅在 T31 服务 `course_matcher.py`（line 289~290）内部做。当前路由用 mock（单候选），T31 真实接入后依赖上游排序才能满足契约。
+- **建议**：路由层 `sorted(candidates, key=confidence, reverse=True)` 兜底，或在 T31 接入联调时验证服务契约。
+- **用例**：`test_m5_acceptance.py::TestMatchAIStrategy::test_ai_candidates_sorted_desc`（**xfail 固化**）。
+
+### D-34 [P2] M5「命中沉淀 alias」飞轮未实现
+- **现象**：`POST /courses/match` AI 命中、`POST /me/courses` 模板映射后，`course_aliases` 均无新增行（仅 seed 有数据）。架构 §14.2 要求「用户录入时 AI 匹配命中 → 沉淀一条 `source='ai'`（幂等，命中即 upsert）」。
+- **影响**：课程归一对齐飞轮闭环缺失——别名库不会随用户录入增长，长期依赖 AI 调用（成本与延迟不降）。
+- **用例**：`test_m5_acceptance.py::TestAliasPrecipitation::test_ai_match_precipitates_alias`、`test_me_courses_map_precipitates_alias`（**xfail 固化×2**）。
+
+### D-35 [P3] 预存测试时区窗口 flaky（已修复）
+- **现象**：`test_share_card_streak_only`（M3.5）与 `test_stats_aggregation_values`（M4）在本地 00:00~08:00 必败：`StudySession.session_date` 用本地 `date.today()` 播种，而 `me.py` 按 `datetime.now(timezone.utc).date()` 计算 streak → UTC 落后本地一天时 latest 日期超前 → current_streak=0。
+- **处理**：`_d()` 改 UTC 口径播种（两文件），与 API 一致；非 M5 引入，T33 顺手硬化。全量回归 640 passed 证实修复。
+
+### D-36 [P2] /ugc/status 对 pass→pending 投稿 ai_review=null
+- **现象**：AI 初审 pass 的 pending 投稿，`GET /ugc/status` 返回 `ai_review: null`。契约 api.md §14.5 示例要求 `ai_review: {verdict: pass, confidence, reasons}` 透传。
+- **根因**：MVP 约定「AI 初审结果序列化进 `reject_reason` 前缀」，但 `_encode_ai_review_prefix` 仅对 flag 写 `[AI:flag]`，pass 不写 → 反解函数对 `reject_reason=None, status=pending` 返回 None。主动态（auto-approve）与 flag 态可反解，pass→pending 丢失。
+- **建议**：pass 也写前缀（如 `[AI:pass] 题干完整; 答案自算一致`）或新增 `questions.ai_review` JSONB 列（T29 预留选项）。
+- **用例**：`test_m5_acceptance.py::TestUgcStatusQuery::test_ai_review_passthrough_for_pending_pass`（**xfail 固化**）。
+
+### 观察项（非阻断，契约待澄清）
+- **school/textbook 字段未参与匹配**：`CourseMatchRequest.school`/`textbook` 被接收但 `courses.py` 未使用（mock 也不消费）；api.md §14.2 示例「清华 2026春 高等数学A」归一化后为「清华高等数学a」——学校名前缀未剥离，无法命中「高等数学a」别名。前端当前应传纯课程名（校名走 school 字段）或由 T31 服务做校名/教材识别。
+- **升级路径无更新端点**：api.md §14.3「成功后可再调 POST /courses/match 或后续匹配流程回填 template_subject_id」——但 `POST /me/courses` 对已存在 `(user, subject_id)` 恒 409，无 PATCH/PUT 更新 template_subject_id 的端点，已建 school 实例无法通过 API 升级到模板。
+- **Idempotency-Key 未实现**：api.md §14.4/§14.3 声明支持 `Idempotency-Key`，当前无中间件/读取逻辑；实际防重依赖 content_hash 去重（409 DUPLICATE，已测）。
+
+## 30. M5 质量门禁结论
+
+| 门禁 | 结果 |
+|---|---|
+| pytest 单元/集成（M5 专项） | ✅ **140 passed / 4 xfailed**（course_matcher 23 + ugc_review 35 + test_m5_api 24 + test_m5_acceptance 58） |
+| 全量回归（M1~M5） | ✅ **640 passed / 3 skipped / 13 xfailed / 10 xpassed / 1 failed**（唯一 failed 为 test_config 预存环境性）；**D-29 XPASS 确认修复** |
+| M5 新增功能验收 | 课程对齐：别名命中 / 阈值分流 / 模板映射 / school 实例 / 幂等 ✅；**别名沉淀飞轮 ❌ D-34**；UGC 审核流：预检 / pass→pending / 自动放行 / flag 预填 / status 查询 ✅；**ai_review 透传 ⚠️ D-36** |
+| 前端烟测 | 由 T32（1ec16b2，vue-tsc + h5/mp-weixin build 通过）承担，本卡不重复 |
+| 新阻断缺陷 | 无 P1；D-34（P2，飞轮核心目标缺失）与 D-36（P2，状态可查性）建议排期修复；D-33（P3）随 T31 真实接入联调 |
+
+**发布建议**：M5 主链路（课程录入联想/匹配/映射、UGC 投稿 AI 初审/状态查询）验收通过，无 P1 阻断，可进入发布评审。**建议 ep-backend/ep-ai 在发布前或 M6 排期处理 D-34（别名沉淀飞轮）与 D-36（pass 结果透传）**——两者均属契约明示行为（架构 §14.2 / api.md §14.5），缺陷用例已 xfail 固化，修复后自动转 XPASS。
+
+

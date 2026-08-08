@@ -32,7 +32,8 @@ pytestmark = pytest.mark.anyio
 
 
 def _d(offset: int) -> date:
-    return date.today() + timedelta(days=offset)
+    # 用 UTC 日期与 API 的 datetime.now(timezone.utc).date() 口径对齐（本地 00:00~08:00 时区窗口不 flaky）
+    return datetime.now(timezone.utc).date() + timedelta(days=offset)
 
 
 async def _register(client, username: str | None = None, password: str = "pass123456") -> tuple[str, str]:
