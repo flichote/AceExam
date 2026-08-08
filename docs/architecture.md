@@ -1,12 +1,13 @@
 # AceExam 架构设计（M1 基线）
 
-> **状态**：M4 增量 v1.4（2026-08-08）｜**作者**：ep-arch
+> **状态**：M5 增量 v1.5（2026-08-08）｜**作者**：ep-arch
 > **定位**：本文件是系统设计的事实来源。需求唯一事实来源是 [PRD](./PRD.md)；视觉/交互见 [design/](./design/)；表结构与 API 契约分别以 [database](./database.md) 与 [api](./api.md) 为准（评审后锁定，变更走文档）。
 > **配套决策**：关键技术决策固化在 [docs/adr/](../adr/)（ADR-0001 ~ 0003）。
 > **M2 增量说明**：M1 基线（§1~§9）保持不动；MVP 五件套（智能刷题/AI 讲解/拍照录题/薄弱诊断/备考计划）的模块设计在 §10 增量追加，API 契约详版见 [docs/api.md](./api.md)。
 > **M3 增量说明**：§10 五件套保持不动；体验增强与增长功能（知识点图谱可视化 / 考前突击模式 / 打卡连胜 / 学习数据看板 / 排行榜 / 挂科预警）的模块设计在 §11 增量追加；API 契约增量见 [docs/api.md](./api.md) §11；表结构增量由 T14 落地 [docs/database.md](./database.md) §9；任务图见 [docs/ops/M3-taskgraph.md](./ops/M3-taskgraph.md)。
 > **M3.5 增量说明**：§11 保持不动；M3 剩余功能（语音讲解 TTS / UGC 题库共建 / 成绩单海报分享 / 班级排行榜）的模块设计在 §12 增量追加；API 契约增量见 [docs/api.md](./api.md) §12；表结构增量由 T20 落地 [docs/database.md](./database.md) §10；任务图见 [docs/ops/M3.5-taskgraph.md](./ops/M3.5-taskgraph.md)。
 > **M4 增量说明**：§12 保持不动；用户反馈驱动的产品调整（用户自填专业 + 自选本学期课程，公共课独立为课程广场）的模块设计在 §13 增量追加；API 契约增量见 [docs/api.md](./api.md) §13；表结构增量由 T25 落地 [docs/database.md](./database.md) §11（迁移 `0005_user_major_plaza`，修正 T25 body 中的 0004 编号冲突）；任务图见 [docs/ops/M4-taskgraph.md](./ops/M4-taskgraph.md)。
+> **M5 增量说明**：§13 保持不动；产品策略落地的两件事（课程三级归一对齐：校本课程实例 → AI 映射模板课程；题库飞轮：UGC 拍照录题 + AI 初审管线 + 行为数据反哺）的模块设计在 §14 增量追加；API 契约增量见 [docs/api.md](./api.md) §14；表结构增量由 T29 落地 [docs/database.md](./database.md) §12（迁移 `0006_course_alias_level`）；任务图见 [docs/ops/M5-taskgraph.md](./ops/M5-taskgraph.md)。
 
 ---
 
@@ -16,14 +17,15 @@
 |---|---|---|
 | `docs/PRD.md` | 需求唯一事实来源（功能分层/核心闭环/题库策略） | v0.1 已定 |
 | `docs/design/*` | 页面地图 / 设计系统 / 组件 / 交互流程 | 已定 |
-| **`docs/architecture.md`（本文）** | 系统模块划分、科目模板、RAG 管线、LLM 分级、API 骨架、ADR 索引、M2 五件套 + M3 图谱/突击/看板/排行/预警 + M3.5 TTS/UGC/海报/班级 + M4 专业选课/课程广场模块设计 | **M4 增量 v1.4** |
-| `docs/database.md` | 表结构（M1 基线；M2 §8 / M3 §9 / M3.5 §10 / M4 §11 增量） | M1 锁定，M2 §8 已交付，M3 §9 已交付，M3.5 §10 由 T20，M4 §11 由 T25 |
-| `docs/api.md` | API 契约详版（Pydantic 级字段定义 + 各里程碑差异表） | **M4 v1.2（47 端点）** |
+| **`docs/architecture.md`（本文）** | 系统模块划分、科目模板、RAG 管线、LLM 分级、API 骨架、ADR 索引、M2 五件套 + M3 图谱/突击/看板/排行/预警 + M3.5 TTS/UGC/海报/班级 + M4 专业选课/课程广场 + M5 课程归一对齐/题库飞轮模块设计 | **M5 增量 v1.5** |
+| `docs/database.md` | 表结构（M1 基线；M2 §8 / M3 §9 / M3.5 §10 / M4 §11 / M5 §12 增量） | M1 锁定，M2 §8 已交付，M3 §9 已交付，M3.5 §10 由 T20，M4 §11 由 T25，M5 §12 由 T29 |
+| `docs/api.md` | API 契约详版（Pydantic 级字段定义 + 各里程碑差异表） | **M5 v1.3（52 端点）** |
 | `docs/ops/M1-taskgraph.md` | M1 里程碑任务图与启动手册 | 已存在，T1 完善 |
 | `docs/ops/M2-taskgraph.md` | M2 里程碑任务图（T7~T12） | T7 产出 |
 | `docs/ops/M3-taskgraph.md` | M3 里程碑任务图（T13~T18） | T13 产出 |
 | `docs/ops/M3.5-taskgraph.md` | M3.5 里程碑任务图（T19~T23） | T19 产出 |
 | `docs/ops/M4-taskgraph.md` | M4 任务图（T24~T27：专业选课 + 课程广场） | T24 产出 |
+| `docs/ops/M5-taskgraph.md` | M5 任务图（T28~T33：课程归一对齐 + 题库飞轮） | T28 产出 |
 
 **规则**：接口契约（API 字段、表结构）由 ep-arch 评审后锁定；任何变更必须同步修改本文档 + 对应交付文档，禁止只改代码。
 
@@ -1126,3 +1128,150 @@ subjects
 | D16 | 用户选课建模 | `user_subjects` 多对多关联表（复合主键防重复）；幂等覆盖式 PUT（先删后插同事务）；学习状态实时聚合不落表 |
 | D17 | 广场游客边界 | `GET /subjects/plaza` 游客白名单可看（joined=false）；加入/修改必须登录 |
 | D18 | 学期维度 | MVP 单学期制，`user_subjects` 即本学期课程，不建 semester 字段；多学期切换 V2 再评估（加 `semester` 列或独立选课记录表） |
+
+---
+
+## 14. M5 增量：课程归一对齐 + 题库飞轮
+
+> 本节是 M5 的模块级设计，在 M4 基线上增量追加（§1~§13 不重写）。**接口契约（字段级）以 [docs/api.md](./api.md) §14 为准；表结构变更以 [docs/database.md](./database.md)（T29 增量）为准。**
+> 触发背景（产品策略，见 [docs/product/题库策略.md](../product/题库策略.md)）：每个学校课程不同，题库无法人工覆盖长尾。M5 落地两件事——①课程三级归一对齐：校本课程实例 → AI 映射到模板课程 → 题目跨校共享；②题库飞轮：UGC 拍照录题（已有 OCR）+ **AI 初审管线**（自动校验 → pending → active/rejected）+ 行为数据反哺质量。
+
+### 14.1 概念：课程三级归一对齐
+
+**问题**：「XX大学 高数A」和「YY大学 高等数学（上）」是同一门课，但名字、教材、章节全不同。若每校独立题库 → 碎片化不可用。
+
+**解法**：三级对齐模型——课程实例（用户侧）→ 模板课程（题库挂载点）→ 知识点（对齐单元）：
+
+```
+课程实例（学校特有）         课程模板（归一）          知识点（对齐）
+┌─────────────┐           ┌─────────────┐         ┌─────────────┐
+│ 清华·高数A   │──┐        │             │         │ 函数与极限   │
+│ 北大·高数上  │──┼───────►│ 高等数学     │────────►│ 导数与微分   │
+│ 某职校·高数  │──┘        │  (code: ma) │         │ 积分学       │
+└─────────────┘           └─────────────┘         └─────────────┘
+    user_subjects             subjects               kp_tree
+```
+
+- **用户侧**：选「本校课程实例」（`user_subjects` 行）→ 系统自动**映射到模板课程**（AI 做课程名匹配 + 教材版本识别）。
+- **题库侧**：题目挂在**模板课程 + 知识点**上，不挂在某校实例 → 清华学生传的题，北大/职校学生都能刷到；同一知识点跨校共享，题库规模放大。
+- **`subjects` 分层（新字段 `level`）**：`public`（公共课）/ `major`（专业基础课）/ `school`（校本特色课，未归一化前的长尾实例）。公共课（高数、英语、线代、大物…）为 `public`；专业基础课（数据结构、电路…）为 `major`；学校自创课（某职校·机床维修）为 `school`。`is_public`（M4）继续控制是否上广场；`level` 是课程性质标签（题库策略/供给方式用）。
+
+### 14.2 数据模型增量（T29 落地）
+
+| 对象 | 变更 | 说明 |
+|---|---|---|
+| `course_aliases`（新表） | 新表 | 同课多名归一：alias（如 "高等数学A"/"高数上"/"高数"）→ template_subject_id |
+| `subjects.level`（新列） | 增列 | `public` / `major` / `school` 课程分层（NOT NULL DEFAULT 'public'） |
+| `user_subjects.template_subject_id`（新列） | 增列 | 用户所选课程实例映射到的模板课程外键（NULL=未归一，独立实例） |
+
+**course_aliases 设计要点**：
+
+```sql
+course_aliases
+├── id              UUID PK
+├── alias           VARCHAR(100) NOT NULL        -- 归一化课程名（去空格/括号/学期/教材版本噪声）
+├── template_subject_id UUID NOT NULL FK → subjects.id
+├── source          VARCHAR(20) NOT NULL DEFAULT 'seed'   -- 'seed'(种子) / 'ai'(AI 匹配沉淀) / 'manual'(人工录入)
+├── is_verified     BOOLEAN NOT NULL DEFAULT false        -- 是否人工/高分确认（未确认仅候选，不直接采用）
+├── created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+├── updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+└── UNIQUE (alias)  -- 同课多名→同一模板；不同 alias 可指向同一模板（多对一）
+```
+
+- **写入时机**：①种子数据（高数/英语等公共课别名，`source='seed'`）；②用户录入时 AI 匹配命中 → 沉淀一条 `source='ai'`（幂等，命中即 upsert）；③匹配失败用户手动确认模板 → `source='manual'` + `is_verified=true`。
+- **查询语义**：录入联想/匹配时先查别名（精确命中 → 直接映射，置信度 1.0），未命中再走 AI 语义匹配 → 降低 AI 调用成本、匹配越来越准（飞轮）。
+
+**user_subjects.template_subject_id 语义**：
+
+- 用户添加校本课程实例（如「清华·高数A」）→ 若匹配到模板「高等数学」：写入 `user_subjects(user_id, subject_id=校本实例或模板?, template_subject_id=模板id)`。
+- **subject_id 存什么**：为保持「题目挂模板」且「用户课程列表显示校本名」，约定——`subject_id` 指向实际展示课程（`subjects` 行，可能 `level='school'`），`template_subject_id` 指向题目来源模板（可为 `subject_id` 自身，若该课程本身就是模板）。刷题/检索一律按 `template_subject_id`（NULL 时回退 `subject_id`）取题。
+- 未匹配（无模板）→ `template_subject_id=NULL`，独立实例（`level='school'`）只能靠自身 UGC 攒题，后续被匹配到模板时回填外键（升级路径）。
+
+### 14.3 课程匹配流程（AI 匹配 + 置信度阈值）
+
+```
+用户录入校本课程名（如「清华 2026春 高等数学A」）
+   │
+   ├─ 1. 归一化：去空白/学期/括号/教材版本 → 「高等数学A」
+   ├─ 2. 精确命中 course_aliases.alias？
+   │      ├─ 是 → 直接映射模板（confidence=1.0，返回候选 1 条）→ 前端可一键确认
+   │      └─ 否 → 3. AI 语义匹配（course_matcher 服务，DeepSeek flash）
+   │                输入：归一化名 + 可选学校名 + 可选教材
+   │                输出：候选模板列表 [{template_subject_id, name, code, confidence, reason}]
+   ├─ 4. 阈值决策（D21）：
+   │      confidence ≥ 0.85 → 自动采用 top1（前端显示匹配结果，用户可改选）
+   │      0.60 ≤ confidence < 0.85 → 返回候选供用户选择（确认后按 D20 沉淀 alias）
+   │      < 0.60 或 AI 无法判定 → 未匹配
+   └─ 5. 未匹配处理：
+          ├─ 手动建实例：POST /me/courses {name, template_subject_id: null} → subjects 插入 level='school' 行 + user_subjects 关联（template_subject_id=NULL）
+          └─ 或手动指定模板：用户在候选列表找不到时，可搜索广场课程手动确认模板（POST /me/courses {template_subject_id: 指定}）
+```
+
+- **教材版本识别**：AI 匹配时若用户提供教材名（如「同济第七版」），作为匹配特征之一；教材文本入库后（已有 textbook_uploads）知识点结构天然对齐模板课程。
+- **幂等**：同用户同校本课程名重复添加 → 返回已有 `user_subjects` 记录（409 `ALREADY_EXISTS` 语义，前端提示「已在你的课程中」）。
+- **约束**：`user_subjects` 复合主键 (user_id, subject_id) 防重复；校本实例 `subjects` 行 `is_active=true` 才可关联。
+
+### 14.4 UGC 审核流：AI 初审管线（题库飞轮）
+
+**与 M3.5 的关系**（§12.2 已有规则预检 + 人工审核；M5 增量 = AI 初审自动化）：
+
+```
+投稿 POST /ugc/upload（M5 新增，含 AI 初审）
+   │
+   ├─ 规则预检（复用 ugc_service，§12.2）：
+   │      content ≥ 15 字；type 合法；answer 结构与题型匹配；content_hash 去重
+   │      → 不通过 400/409 DUPLICATE（不落库）
+   │
+   ├─ AI 初审（ugc_review 服务，DeepSeek flash，新增）：
+   │      · 题干完整性校验（有无题意、选项是否齐全）
+   │      · 答案正确性校验（选择/填空可规则抽检：AI 自算 + 反向代入）
+   │      · 知识点归属校验（挂载的 knowledge_point_id 是否属于模板课程）
+   │      → 输出 verdict（pass / flag）+ confidence + reasons[]
+   │
+   ├─ 落库 questions(source='ugc')：
+   │      · verdict=pass 且 confidence ≥ 0.85 → status='pending'（进人工抽查队列，小流量自动放行）
+   │      · verdict=flag 或 confidence < 0.85 → status='pending' + reject_reason 预填 AI 理由
+   │        （人工复核后置 active / rejected；AI 只预筛不终审——质量兜底 D22）
+   │
+   └─ 行为数据反哺（M5 预留字段，落地可选）：
+          active 后刷题正确率 < 40% → 标记「有争议」，进入复核队列（D22）
+```
+
+- **与 M3.5 `POST /questions/ugc` 的关系**：M3.5 端点保留（个人录题/兼容旧客户端）；M5 推荐走 `POST /ugc/upload`（AI 初审内置）。两者最终都进 `questions(status='pending')` 同一审核队列。
+- **AI 审核不直接置 active**（除非 `subjects.config.ugc_ai_auto_approve=true` 且 confidence ≥ 0.9，D22 决策）：AI 幻觉风险下，人工抽查是质量底线；自动放行仅对可信贡献者开放（M3.5 已有贡献者积分逻辑可复用）。
+- **状态机**（复用 M3.5 §12.2）：`pending` → `active` / `rejected`；`GET /ugc/status` 供投稿者查询状态与拒绝理由。
+- **AI 初审结果落库**：不新建审核表；`reject_reason` 存 AI 理由文本（人工改判时覆盖），`reviewed_by/reviewed_at` 由人工审核时填写（AI 预筛阶段为 NULL）。
+
+### 14.5 表结构增量（与 ep-db 的约定，T29 落地）
+
+> 架构层面锁定以下表/字段需求；DDL 与迁移由 T29 落地（`backend/alembic/versions/0006_course_alias_level.py`，**down_revision=0005_user_major_plaza**）并同步更新 `docs/database.md` §12（评审后锁定，禁止手改）。
+
+1. **`course_aliases`（新表）**：字段见 §14.2（alias / template_subject_id / source / is_verified / created_at / updated_at，UNIQUE(alias)）；索引 `ix_course_aliases_template (template_subject_id)`（按模板查别名）。
+2. **`subjects.level`（新列）**：`VARCHAR(20) NOT NULL DEFAULT 'public'`，CHECK `IN ('public','major','school')`；`ix_subjects_level (level, is_active)`（分层列表/广场过滤）。
+3. **`user_subjects.template_subject_id`（新列）**：`UUID NULL FK → subjects.id`；索引 `ix_user_subjects_template (user_id, template_subject_id)`（用户课程→模板题源）。
+4. **种子数据（seed 更新）**：高数/英语/线代/概率论/大物等公共课 `level='public'`（`is_public=true` 保持）；`course_aliases` 种子：高等数学←"高等数学A"/"高数A"/"高数上"/"高等数学（上）"、大学英语←"大学英语"/"英语"/"大学英语综合" 等（`source='seed', is_verified=true`）。
+
+### 14.6 M5 新增/调整的代码文件总览（角色边界）
+
+| 文件 | 归属 | 说明 |
+|---|---|---|
+| `backend/app/models/`（course_aliases / subjects.level / user_subjects.template_subject_id）、`backend/alembic/versions/0006_course_alias_level.py`、`docs/database.md` §12 | T29 | 表增量（§14.5）+ 种子（公共课 level + aliases 种子） |
+| `backend/app/api/v1/courses.py`（新增，14.1~14.3）、`backend/app/schemas/courses.py`（新增） | T30 | GET /courses/aliases、POST /courses/match、POST /me/courses（§14.3 + api.md §14） |
+| `backend/app/api/v1/ugc.py`（扩展，14.4~14.5）、`backend/app/schemas/ugc.py`（扩展） | T30 | POST /ugc/upload、GET /ugc/status |
+| `backend/app/services/course_matcher.py`（新增） | T31 | AI 课程名匹配（别名命中 + DeepSeek 语义匹配 + 阈值决策，§14.3） |
+| `backend/app/services/ugc_review.py`（新增） | T31 | AI 初审管线（题干/答案/知识点校验 + verdict + confidence，§14.4） |
+| `backend/app/services/ugc_service.py`（扩展） | T31 | 规则预检复用 + 接入 AI 初审（在投稿落库前调用 ugc_review） |
+| `backend/app/db/seed.py`（或种子脚本） | T29 | level 回填 + course_aliases 种子 |
+| `frontend/` | T32 | 校本课程录入页（联想 /courses/aliases + 匹配确认 /courses/match + 提交 /me/courses）、课程广场按模板课展示（保持 is_public 语义）、题库共建入口（投稿 /ugc/upload + 状态 /ugc/status） |
+| `backend/tests/`、`docs/qa/` | T33 | 课程对齐验收测试 + UGC AI 审核流测试 + test-report.md 更新（api.md §14 用例） |
+
+> 冲突规避：T29（ep-db）只写 models/alembic/seed/database.md；T30（ep-backend）写 api/schemas；T31（ep-ai）写 services（course_matcher / ugc_review / ugc_service 扩展）——services 与 api 目录隔离，T30 在 T31 交付前用接口占位（AI 匹配结果 dict 约定见 api.md §14.2），联调在 T33。
+
+### 14.7 M5 决策锁定表
+
+| # | 决策 | 定案 |
+|---|---|---|
+| D19 | 三级对齐建模 | 校本课程实例 = `user_subjects` 行 + `subjects.level='school'`（未归一实例）；题目挂**模板课程 + 知识点**，检索按 `template_subject_id`（NULL 回退 subject_id）；不建独立实例表/独立题池 |
+| D20 | course_aliases 学习机制 | 别名表（alias → template_subject_id，UNIQUE(alias)）作为匹配缓存与飞轮：种子 + AI 命中沉淀 + 人工确认三级来源；`is_verified` 控制是否直接采用 |
+| D21 | 匹配阈值 | confidence ≥ 0.85 自动采用 top1；0.60~0.85 候选供用户选择；< 0.60 未匹配 → 手动建 `level='school'` 实例或手动指定模板（不阻塞用户） |
+| D22 | AI 初审边界 | AI 只做预筛（题干/答案/知识点校验，verdict + confidence），落 pending + 预填 reject_reason；**不直接置 active**（除非 subjects.config.ugc_ai_auto_approve=true 且 confidence ≥ 0.9）；行为数据（正确率<40%）标记争议复核（M5 预留） |

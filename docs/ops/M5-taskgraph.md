@@ -3,7 +3,7 @@
 > **适用场景**：M4（专业选课 + 课程广场）已交付后，一键启动 M5 开发（题库策略落地：课程归一对齐 + 题库飞轮）。
 > **前置**：6 个 ep-* 角色就绪，主 profile 网关在跑；board `aceexam` 已建；T28 已产出契约文档。
 > **M5 目标**（`docs/product/题库策略.md`）：解决「每个学校课程不同，题库怎么完善」——课程三级归一对齐（course_aliases 映射 + subjects.level）+ 题库飞轮（UGC 传题 + AI 初审管线）。
-> **契约来源**：模块设计见 `docs/architecture.md` §14（含决策锁定表 D19~D22）；API 契约见 `docs/api.md` §14（T28 产出）；表结构增量见 `docs/database.md` §12（T29 产出，迁移 `0006_course_alias_level`）。
+> **契约来源**：模块设计见 `docs/architecture.md` §14（含决策锁定表 D19~D22）；API 契约见 `docs/api.md` §14（T28 产出，新增 5 端点，总计 52）；表结构增量见 `docs/database.md` §12（T29 产出，迁移 `0006_course_alias_level`）。
 
 ## 任务图设计
 
@@ -46,9 +46,9 @@ T28 ep-arch（架构师）                 ← root，本任务交付契约 + �
 
 | 角色 | 写入目录 | 关键文件 |
 |---|---|---|
-| T29 ep-db | `backend/alembic/`、`docs/database.md` | `alembic/versions/0006_course_alias_level.py`（course_aliases 表 + subjects.level + user_subjects.template_subject_id）；database.md §12 增量 |
-| T30 ep-backend | `backend/app/api/`、`backend/app/schemas/`、`backend/app/models/` | `api/v1/courses.py`（14.1~14.3）+ `api/v1/ugc.py` 扩展（14.4）；schemas/courses.py；models：course_aliases / subjects.level / user_subjects.template_subject_id |
-| T31 ep-ai | `backend/app/services/` | `services/course_matcher.py`（AI 课程名匹配）+ `services/ugc_review.py`（AI 初审管线） |
+| T29 ep-db | `backend/alembic/`、`backend/app/db/`、`docs/database.md` | `alembic/versions/0006_course_alias_level.py`（course_aliases 表 + subjects.level + user_subjects.template_subject_id）；`db/seed.py`（公共课 level='public' 回填 + course_aliases 种子）；database.md §12 增量 |
+| T30 ep-backend | `backend/app/api/`、`backend/app/schemas/`、`backend/app/models/` | `api/v1/courses.py`（14.1~14.3）+ `api/v1/ugc.py` 扩展（14.4~14.5）；schemas/courses.py；models：course_aliases / subjects.level / user_subjects.template_subject_id |
+| T31 ep-ai | `backend/app/services/` | `services/course_matcher.py`（AI 课程名匹配）+ `services/ugc_review.py`（AI 初审管线）+ `services/ugc_service.py` 扩展（规则预检后接入 AI 初审） |
 | T32 ep-frontend | `frontend/` | 校本课程录入页、课程广场按模板课展示、题库共建（投稿）入口；mock 保留在 `frontend/src/mock/` 做 fallback |
 | T33 ep-qa | `backend/tests/`（除 test_ai_* 外）+ `docs/qa/` | 课程对齐验收测试 + UGC 审核流测试 + test-report.md 更新；只加测试不改业务代码（发现 bug 记录在案） |
 

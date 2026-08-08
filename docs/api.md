@@ -1,9 +1,9 @@
-# AceExam API 契约（M4）
+# AceExam API 契约（M5）
 
-> **状态**：M4 v1.2（2026-08-08）｜**作者**：ep-arch
-> **定位**：前后端对接的唯一依据（Pydantic schema 级字段定义）。模块设计见 [architecture](./architecture.md)（§10 M2 五件套、§11 M3 图谱/突击/看板/排行/预警、§12 M3.5 TTS/UGC/海报/班级、§13 M4 专业选课/课程广场）；表结构见 [database](./database.md)；需求见 [PRD](./PRD.md)。
+> **状态**：M5 v1.3（2026-08-08）｜**作者**：ep-arch
+> **定位**：前后端对接的唯一依据（Pydantic schema 级字段定义）。模块设计见 [architecture](./architecture.md)（§10 M2 五件套、§11 M3 图谱/突击/看板/排行/预警、§12 M3.5 TTS/UGC/海报/班级、§13 M4 专业选课/课程广场、§14 M5 课程归一对齐/题库飞轮）；表结构见 [database](./database.md)；需求见 [PRD](./PRD.md)。
 > **评审**：接口契约由 ep-arch 评审后锁定；任何变更必须同步修改本文档 + 相关代码，禁止只改代码。
-> **覆盖范围**：M1 已交付端点（§1~§4 简述）+ M2 五件套端点（§5~§8 详述）+ 与 M1 差异总表（§9）+ M2 实现备注（§10）+ M3 新增端点（§11）+ M3.5 新增端点（§12）+ M4 专业选课/课程广场端点（§13）。
+> **覆盖范围**：M1 已交付端点（§1~§4 简述）+ M2 五件套端点（§5~§8 详述）+ 与 M1 差异总表（§9）+ M2 实现备注（§10）+ M3 新增端点（§11）+ M3.5 新增端点（§12）+ M4 专业选课/课程广场端点（§13）+ M5 课程归一对齐/题库飞轮端点（§14）。
 
 ---
 
@@ -36,7 +36,7 @@
 ### 0.3 分页 / 幂等 / 时区
 
 - 分页响应统一：`{"items": [...], "total": int, "page": int, "page_size": int}`
-- 写操作支持 `Idempotency-Key` 头：`POST /questions/{id}/answers`、`POST /questions/from-ocr`、`POST /diagnose/report`、`POST /plans`、`POST /plans/{id}/checkin`、`POST /ocr/upload`、`POST /questions/ugc`、`POST /me/class`、`POST /admin/questions/{id}/review`（M3.5 新增）。服务端对同 key 重放返回首次结果（不重复写）。
+- 写操作支持 `Idempotency-Key` 头：`POST /questions/{id}/answers`、`POST /questions/from-ocr`、`POST /diagnose/report`、`POST /plans`、`POST /plans/{id}/checkin`、`POST /ocr/upload`、`POST /questions/ugc`、`POST /me/class`、`POST /admin/questions/{id}/review`（M3.5 新增）、`POST /ugc/upload`（M5 新增）。服务端对同 key 重放返回首次结果（不重复写）。
 - 时间字段统一 ISO8601 UTC（`2026-08-07T12:00:00Z`）；日期字段 `YYYY-MM-DD`。
 - 所有带 subject 语义的列表接口必须支持/必填 `subject_id`（ADR-0001 防串科）。
 
@@ -1154,3 +1154,173 @@ PlazaSubject：
 - **T26（ep-frontend）**：按本契约对接；选课引导页（PUT /me/profile + PUT /me/subjects）、首页「我的课程」（GET /me/subjects）、课程广场页（GET /subjects/plaza + 加入按钮）；「我的」页专业编辑入口；mock 降级保留。
 - **T27（ep-qa）**：按 §13 边界断言——PUT /me/profile 401/400、PUT /me/subjects 幂等覆盖 + 422 SUBJECT_NOT_JOINABLE、GET /me/subjects 统计口径、GET /subjects/plaza 游客/登录 joined 差异；0005 迁移可执行（alembic upgrade head --sql 或等效）；回归 subjects/questions/practice 主链路。
 - 变更流程：改端点/字段必须先改本文档 + architecture.md §13 对应小节，再改代码；评审由 ep-arch。
+
+---
+
+## 14. M5 增量：课程归一对齐 / 题库飞轮 API
+
+> 本节是 M5 的端点级契约（产品策略落地：课程三级归一对齐 + UGC AI 初审管线）。模块设计见 architecture.md §14（决策锁定 D19~D22）；表增量见 database.md §12（T29 落地，迁移 `0006_course_alias_level`）。
+
+### 14.1 GET /courses/aliases（新增，查询课程别名，供录入时联想）
+
+| 项 | 值 |
+|---|---|
+| 鉴权 | 登录 |
+| Query | `q`（string，可选，别名前缀/包含匹配，默认返回全部 verified 别名）；`limit`（int，可选，默认 10，≤ 20）；`template_subject_id`（uuid，可选，按模板过滤） |
+| 响应 200 | `{"items": [CourseAliasItem], "total": int}` |
+
+CourseAliasItem：
+
+```json
+{
+  "alias": "高等数学A",
+  "template_subject_id": "uuid",
+  "template_name": "高等数学",
+  "template_code": "math_gaoshu",
+  "source": "seed",
+  "is_verified": true
+}
+```
+
+实现要点：
+- `q` 为空时返回 `is_verified=true` 的别名（录入联想种子列表）；有 `q` 时 `alias ILIKE %q%`（归一化后匹配，忽略空格/括号差异），按 `is_verified DESC, alias` 排序。
+- 未登录 401；无别名返回 `{"items": [], "total": 0}`。
+
+### 14.2 POST /courses/match（新增，校本课程名 → 匹配模板课程，AI 候选 + 置信度）
+
+| 项 | 值 |
+|---|---|
+| 鉴权 | 登录 |
+| 请求 | `{"name": "清华 2026春 高等数学A", "school": "清华大学"(可选), "textbook": "同济第七版"(可选), "limit": 5(可选, 默认 5, ≤10)}` |
+| 响应 200 | `{"matched": true/false, "candidates": [CourseMatchCandidate], "strategy": "alias"\|"ai"\|"manual"}` |
+
+CourseMatchCandidate：
+
+```json
+{
+  "template_subject_id": "uuid",
+  "name": "高等数学",
+  "code": "math_gaoshu",
+  "confidence": 0.92,
+  "reason": "别名精确命中：高等数学A",
+  "source": "alias"
+}
+```
+
+语义：
+- **归一化**：`name` 去首尾空白、去学期/年份/括号噪声（"2026春"、"（上）" 等），长度 1..100。
+- **策略**：①先查 `course_aliases`（归一化后精确命中 → `strategy=alias`，`confidence=1.0`，仅 1 条候选）；②未命中 → AI 语义匹配（course_matcher 服务，DeepSeek flash）→ `strategy=ai`，候选按 confidence 降序；③用户显式手动指定模板时前端直接调 POST /me/courses 传 `template_subject_id`（本端点不承载 manual 提交，`strategy=manual` 仅用于响应透传确认来源）。
+- **阈值约定（D21）**：`confidence ≥ 0.85` → 前端自动采用 top1（可让用户改选）；`0.60 ≤ confidence < 0.85` → 展示候选列表供用户选择；`< 0.60` 或空候选 → `matched=false`，引导「手动建实例」或「手动指定模板」。
+- 错误：400 `VALIDATION_ERROR`（name 空/超长）、401 `UNAUTHORIZED`。
+
+实现要点（context7 核对 FastAPI/SQLAlchemy 写法）：
+- Pydantic v2 请求模型 `CourseMatchRequest`（`name: str = Field(min_length=1, max_length=100)`，`school/textbook/limit` 可选）；响应 `response_model=CourseMatchResponse`。
+- AI 匹配结果 dict 契约（T31 服务返回，T30 接口占位联调）：`{"candidates": [{"template_subject_id", "confidence", "reason"}], "strategy"}`；`confidence` 为 0~1 float，由 course_matcher 按别名命中/语义打分给出。
+- 别名命中查询：`SELECT * FROM course_aliases WHERE normalized_alias = :q`（归一化在应用层做：`re.sub(r"[\(（].*?[\)）]|\\s|\\d{4}春?|学期", "", name)`）。
+
+### 14.3 POST /me/courses（新增，录入校本课程实例，映射到模板或手动新建）
+
+| 项 | 值 |
+|---|---|
+| 鉴权 | 登录 |
+| 请求 | `{"name": "清华·高数A", "school": "清华大学"(可选), "template_subject_id": "uuid\|null"}` |
+| 响应 200 | `{"user_subject": {"user_id", "subject_id", "template_subject_id", "created_at"}, "subject": {...}, "matched": true/false}` |
+| 错误 | 401；409 `ALREADY_EXISTS`（同用户同课程已添加）；404（template_subject_id 不存在 / 课程 is_active=false）；400 `VALIDATION_ERROR` |
+
+语义：
+- **template_subject_id 非空**（映射到模板）：写入 `user_subjects(user_id, subject_id=template_subject_id, template_subject_id=template_subject_id)`；若 `subjects` 中已存在同名 `level='school'` 校本实例行则优先挂到该行（`subject_id=校本实例行`, `template_subject_id=模板`），否则直接挂模板课程行。
+- **template_subject_id 为 null**（手动建实例）：`subjects` 插入 `level='school'` 行（name=输入名，code 自动生成如 `school_<8位hash>`，is_active=true, is_public=false）→ `user_subjects(subject_id=新行, template_subject_id=NULL)`。重复提交同 `name` → 复用已存在校本实例行。
+- **幂等**：同 `user_id + subject_id` 已存在 → 409 `ALREADY_EXISTS`（detail 带已有记录 id，前端提示「已在你的课程中」，不重复插入）。支持 `Idempotency-Key` 防重放。
+- 成功后可再调 `POST /courses/match` 或后续匹配流程回填 `template_subject_id`（升级路径）。
+
+### 14.4 POST /ugc/upload（新增，UGC 投稿，含 AI 初审）
+
+| 项 | 值 |
+|---|---|
+| 鉴权 | 登录；支持 `Idempotency-Key`（§0.3） |
+| 请求 | 复用 M3.5 §12.3 的请求体 + 可选 `skip_ai_review: false`（默认 false） |
+
+```json
+{
+  "subject_id": "uuid",
+  "knowledge_point_id": "uuid",
+  "type": "single",
+  "content": "题干（≥15 字）",
+  "options": [{"key": "A", "text": "选项A"}],
+  "answer": "C",
+  "analysis": "解析（可选）",
+  "ocr_upload_id": "uuid|null",
+  "skip_ai_review": false
+}
+```
+
+响应 201：
+
+```json
+{
+  "question_id": "uuid",
+  "status": "pending",
+  "duplicated": false,
+  "ai_review": {
+    "verdict": "pass",
+    "confidence": 0.9,
+    "reasons": ["题干完整", "答案自算一致", "知识点归属正确"]
+  }
+}
+```
+
+语义：
+- **规则预检**（复用 M3.5 ugc_service，§12.2）：content ≥ 15 字；type/answer/options 结构与题型匹配；content_hash 去重 → 命中返回 409 `DUPLICATE`（detail 既有 question_id）。
+- **AI 初审**（T31 `ugc_review` 服务，DeepSeek flash）：题干完整性 + 答案正确性（选择/填空规则抽检）+ 知识点归属 → `verdict`（pass/flag）+ `confidence` + `reasons[]`。`skip_ai_review=true` 时（管理端/测试用）跳过 AI，直接落 pending。
+- **落库**：`questions(source='ugc', status='pending', submitted_by=当前用户, subject_id=模板课程id（经 template_subject_id 解析）, reject_reason=AI flag 时预填理由)`。AI 不直接置 active（D22）；若 `subjects.config.ugc_ai_auto_approve=true` 且 `verdict=pass` 且 `confidence ≥ 0.9` → 直接置 `active`。
+- **subject_id 解析**：投稿可传用户课程实例 id（`level='school'` 行）→ 后端按 `user_subjects.template_subject_id`（或 `subjects` 自身）解析为模板课程后落库（题目挂模板，跨校共享）。
+- 错误：401、404（subject/kp/ocr_upload 不存在）、409 `DUPLICATE`、422（预检失败，detail 含字段错误）。
+
+### 14.5 GET /ugc/status（新增，投稿审核状态查询）
+
+| 项 | 值 |
+|---|---|
+| 鉴权 | 登录（仅返回当前用户投稿） |
+| Query | `status`（可选：pending/active/rejected）；`page`/`page_size`（可选，默认 1/20，page_size ≤ 50） |
+| 响应 200（统一分页） | `{"items": [UgcStatusItem], "page": 1, "page_size": 20, "total": n}` |
+
+UgcStatusItem：
+
+```json
+{
+  "question_id": "uuid",
+  "subject_id": "uuid",
+  "subject_name": "高等数学",
+  "knowledge_point_id": "uuid",
+  "knowledge_point_name": "洛必达法则",
+  "type": "single",
+  "content": "题干（截断 50 字）",
+  "status": "pending",
+  "reject_reason": null,
+  "ai_review": {"verdict": "pass", "confidence": 0.9, "reasons": ["题干完整"]},
+  "submitted_at": "2026-08-08T12:00:00Z",
+  "reviewed_at": null
+}
+```
+
+实现要点：
+- `WHERE submitted_by = 当前用户 ORDER BY submitted_at DESC`；status 过滤可选。
+- `ai_review` 字段：AI 初审结果透传（来自 questions.reject_reason + status 推导；若 M5 落地时新增 `questions.ai_review JSONB` 列则由 T29 同步 §14.5/架构 §14.4，默认无新列，返回 `{verdict: pass|flag|unknown, confidence, reasons}` 由 T31 服务在落库时同步写 json 缓存或由 status/reject_reason 反推——**MVP 契约：T31 落库时把 AI 初审结果序列化进 `questions.reject_reason` 前缀（如 `[AI:flag] 答案自算不一致`），本端点按前缀解析返回 ai_review，人工审核覆盖后前缀消失**）。
+- 空列表返回 `{"items": [], "page": 1, "page_size": 20, "total": 0}`。
+
+### 14.6 差异总表（vs M4）与端点总数
+
+新增 5 个端点（全部新增，无废弃、无修订）：
+
+`GET /courses/aliases`、`POST /courses/match`、`POST /me/courses`、`POST /ugc/upload`、`GET /ugc/status`
+
+> 合计：**52 端点**（M4 47 + M5 新增 5）。§13 为 M4 快照，M5 增量以本节为准。
+
+### 14.7 实现备注（各角色）
+
+- **T29（ep-db）**：迁移 `0006_course_alias_level`（course_aliases 表 + subjects.level + user_subjects.template_subject_id，down_revision=0005_user_major_plaza）；seed：公共课 level='public' 回填 + course_aliases 种子（高数/英语等别名）；同步 `docs/database.md` §12。AI 初审结果 MVP 不新增 questions 列（用 reject_reason 前缀约定，见 §14.5）。
+- **T30（ep-backend）**：按本契约实现路由与 schema——`backend/app/api/v1/courses.py`（14.1~14.3）+ `schemas/courses.py`（CourseAliasItem / CourseMatchRequest / CourseMatchResponse / CourseMatchCandidate / CourseCreateRequest / UserCourseResponse）；`backend/app/api/v1/ugc.py` 扩展（14.4~14.5）+ `schemas/ugc.py` 扩展（UgcUploadRequest / UgcStatusItem）；`models/`：course_aliases、subjects.level、user_subjects.template_subject_id（与 T29 协调，模型先行、迁移后补，或 T29 全做——按 T29/T30 body 约定避免重名冲突）。T31 未交付前，AI 匹配/初审用 mock 实现（返回固定候选/verdict），接口契约不变。
+- **T31（ep-ai）**：`services/course_matcher.py`（归一化 + 别名命中 + DeepSeek 语义匹配 + 阈值决策，返回 §14.2 dict 契约）；`services/ugc_review.py`（题干/答案/知识点校验 → verdict/confidence/reasons）；`services/ugc_service.py` 扩展（规则预检后调 ugc_review，落库时写 reject_reason 前缀）。AI 只预筛不终审（D22）。
+- **T32（ep-frontend）**：校本课程录入页（输入框联想 GET /courses/aliases → 匹配确认 POST /courses/match → 提交 POST /me/courses；未匹配显示「手动建实例」/「手动指定模板」）；课程广场按模板课展示（保持 GET /subjects/plaza is_public 语义，school 实例不上广场）；题库共建入口（投稿 POST /ugc/upload + 状态页 GET /ugc/status）；mock 降级保留在 `frontend/src/mock/`。
+- **T33（ep-qa）**：按 §14 边界断言——/courses/aliases 联想与权限、/courses/match 归一化 + 阈值分流（≥0.85/0.60~0.85/<0.60）、/me/courses 幂等 409 + school 实例复用 + template 映射、/ugc/upload 规则预检 + AI verdict 分流 + Idempotency-Key、/ugc/status 仅本人 + 状态过滤；0006 迁移可执行；回归 M1~M4 主链路（尤其 subjects/questions/practice 与广场）。
+- 变更流程：改端点/字段必须先改本文档 + architecture.md §14 对应小节，再改代码；评审由 ep-arch。
