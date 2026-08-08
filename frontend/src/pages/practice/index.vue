@@ -162,7 +162,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { onLoad } from "@dcloudio/uni-app";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 import { usePracticeStore } from "@/stores/practice";
 import { useSubjectStore } from "@/stores/subject";
 import QuestionCard from "@/components/QuestionCard.vue";
@@ -182,6 +182,17 @@ onLoad((options) => {
   pendingSubjectId.value = (options?.subjectId as string) || "";
   pendingKpId.value = (options?.kpId as string) || "";
   init();
+});
+
+// tabBar 页常驻不销毁：从首页「我的课程」switchTab 切过来时，
+// onLoad 不会重新触发，必须用 onShow 检测科目是否变化并重载。
+onShow(() => {
+  const sid = pendingSubjectId.value || subjectStore.currentSubjectId;
+  if (!sid || practice.loading) return;
+  // 科目变化（或尚未加载过）→ 重新加载该科目题目
+  if (practice.subjectId !== sid || !practice.questions.length) {
+    practice.loadQuestions(sid, 10, pendingKpId.value || undefined);
+  }
 });
 
 async function init() {
