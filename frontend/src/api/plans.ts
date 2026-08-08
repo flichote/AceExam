@@ -30,7 +30,9 @@ export async function createPlan(payload: CreatePlanPayload): Promise<ActivePlan
           title: payload.title || "期末冲刺计划",
         },
       }),
-    () => mockCreatePlan()
+    () => mockCreatePlan(),
+    undefined,
+    { write: true } // POST 写操作失败不降级 mock
   );
 }
 
@@ -55,6 +57,8 @@ export async function checkinPlan(planId: string): Promise<CheckinResult> {
         method: "POST",
         data: {},
       }),
-    () => mockCheckin()
+    () => mockCheckin(),
+    undefined,
+    { write: true } // POST 写操作失败不降级 mock
   );
 }

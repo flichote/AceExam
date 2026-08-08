@@ -26,7 +26,9 @@ export async function updateProfile(major: string): Promise<UserProfile> {
       is_member: false,
       member_expires_at: null,
       created_at: new Date().toISOString(),
-    })
+    }),
+    "服务暂不可用，已加载演示数据",
+    { write: true } // PUT 写操作失败不降级 mock
   );
 }
 
@@ -76,6 +78,8 @@ export async function updateMeSubjects(subjectIds: string[]): Promise<MeSubjects
         })),
       ];
       return { items: joined, total: joined.length };
-    }
+    },
+    "服务暂不可用，已加载演示数据",
+    { write: true } // PUT 写操作失败不降级 mock
   );
 }

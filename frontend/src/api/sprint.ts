@@ -18,7 +18,9 @@ export async function activateSprint(subjectId: string): Promise<SprintActivateR
         method: "POST",
         data: {},
       }),
-    () => mockSprintActivate(subjectId)
+    () => mockSprintActivate(subjectId),
+    undefined,
+    { write: true } // POST 写操作失败不降级 mock
   );
 }
 

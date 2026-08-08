@@ -30,7 +30,9 @@ export async function login(username: string, password: string): Promise<LoginRe
         member_expires_at: null,
         created_at: new Date().toISOString(),
       },
-    })
+    }),
+    "服务暂不可用，已加载演示数据",
+    { write: true } // POST 登录失败不降级 mock（否则假装登录成功）
   );
   setToken(result.access_token);
   return result;

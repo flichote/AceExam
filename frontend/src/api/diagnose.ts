@@ -17,7 +17,9 @@ export async function startSelfTest(subjectId: string, count = 10): Promise<Self
         method: "POST",
         data: { subject_id: subjectId, count, include_weak: true },
       }),
-    () => mockStartSelfTest()
+    () => mockStartSelfTest(),
+    undefined,
+    { write: true } // POST 写操作失败不降级 mock
   );
 }
 
@@ -48,6 +50,8 @@ export async function submitDiagnosis(
         method: "POST",
         data: { report_id: reportId, answers },
       }),
-    () => mockDiagnosisReport()
+    () => mockDiagnosisReport(),
+    undefined,
+    { write: true } // POST 写操作失败不降级 mock
   );
 }

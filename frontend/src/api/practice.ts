@@ -107,6 +107,8 @@ export async function submitQuestionAnswer(
         },
         explanation_available: true,
       };
-    }
+    },
+    undefined,
+    { write: true } // POST 提交答案失败不降级 mock
   );
 }

@@ -173,7 +173,8 @@ export function isNetworkError(e: unknown): boolean {
 export async function withFallback<T>(
   real: () => Promise<T>,
   mock: () => T | Promise<T>,
-  fallbackHint = "服务暂不可用，已加载演示数据"
+  fallbackHint = "服务暂不可用，已加载演示数据",
+  opts: { write?: boolean } = {}
 ): Promise<T> {
   if (USE_MOCK) return mock();
   try {
@@ -182,7 +183,8 @@ export async function withFallback<T>(
     const err = e as ApiError;
     const status = err.status;
     const fallbackable = !status || status >= 500 || (status === 401 && !getToken());
-    if (!fallbackable) throw e;
+    // 写操作（PUT/POST/DELETE）失败绝不降级 mock：用户以为保存成功，实际数据丢失。
+    if (!fallbackable || opts.write) throw e;
     uni.showToast({ title: fallbackHint, icon: "none" });
     return mock();
   }
