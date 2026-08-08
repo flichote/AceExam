@@ -42,6 +42,8 @@ export const usePracticeStore = defineStore("practice", {
     finished: false,
     /** 每题作答结果：questionId → 是否答对（结算面板逐题回顾） */
     results: {} as Record<string, boolean>,
+    /** 最近一次拉题是否返回空（用于区分「暂无题库」与「本组已尽」） */
+    emptyLibrary: false,
   }),
 
   getters: {
@@ -96,6 +98,7 @@ export const usePracticeStore = defineStore("practice", {
         this.correctCount = 0;
         this.finished = false;
         this.results = {};
+        this.emptyLibrary = res.items.length === 0;
         this.resetAnswer();
         await this.loadKnowledgePoints(subjectId_);
       } catch (e) {
@@ -180,11 +183,9 @@ export const usePracticeStore = defineStore("practice", {
     },
 
     restart() {
-      this.index = 0;
-      this.correctCount = 0;
-      this.finished = false;
-      this.results = {};
-      this.resetAnswer();
+      // 「再来一组」：重新向服务端拉取本组题目（排除已见题，可能返回新题）
+      // 若题库为空则 questions 为空 → 页面显示"暂无题库"提示
+      this.loadQuestions(this.subjectId, 10);
     },
   },
 });

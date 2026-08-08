@@ -61,9 +61,18 @@
       />
     </view>
 
-    <!-- 全部刷完（本组已尽，可再来一组：排除已见题） -->
+    <!-- 全部刷完 / 题库为空（区分展示） -->
     <view v-else-if="!practice.current" class="content">
       <EmptyState
+        v-if="practice.emptyLibrary"
+        icon="📭"
+        title="该课程暂无题库"
+        :desc="`「${subjectName}」还没有题目，去课程广场看看其他课程吧`"
+        action-text="去课程广场"
+        @action="goPlaza"
+      />
+      <EmptyState
+        v-else
         icon="🏆"
         title="本组刷完啦"
         desc="已自动排除做过的题，可继续下一组"
@@ -256,6 +265,10 @@ function goAiExplain() {
       `&knowledgePoint=${encodeURIComponent(q.knowledgePoint)}` +
       `&stem=${encodeURIComponent(q.stem)}`,
   });
+}
+
+function goPlaza() {
+  uni.navigateTo({ url: "/pages/plaza/index" });
 }
 </script>
 
