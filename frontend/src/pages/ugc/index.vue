@@ -190,7 +190,7 @@ function formatTime(iso: string): string {
 
 /** 投稿入口（带 ugc 参数：确认页默认勾选「提交为共享题」） */
 function goOcrPhoto() {
-  uni.switchTab({ url: "/pages/ocr/index" });
+  uni.navigateTo({ url: "/pages/ocr/index" });
 }
 function goManualNew() {
   uni.navigateTo({ url: "/pages/ocr/confirm?manual=1&ugc=1" });

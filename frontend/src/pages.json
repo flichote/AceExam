@@ -1,170 +1,164 @@
 {
-	"easycom": {
-		"autoscan": true,
-		"custom": {
-			"^uni-(.*)": "@dcloudio/uni-ui/lib/uni-$1/uni-$1.vue"
-		}
-	},
-	"pages": [
-		{
-			"path": "pages/subjects/index",
-			"style": {
-				"navigationBarTitleText": "AceExam",
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/practice/index",
-			"style": {
-				"navigationBarTitleText": "刷题"
-			}
-		},
-		{
-			"path": "pages/ocr/index",
-			"style": {
-				"navigationBarTitleText": "拍照录题"
-			}
-		},
-		{
-			"path": "pages/diagnose/index",
-			"style": {
-				"navigationBarTitleText": "诊断"
-			}
-		},
-		{
-			"path": "pages/mine/index",
-			"style": {
-				"navigationBarTitleText": "我的"
-			}
-		},
-		{
-			"path": "pages/chat/index",
-			"style": {
-				"navigationBarTitleText": "AI 备考教练"
-			}
-		},
-		{
-			"path": "pages/ocr/confirm",
-			"style": {
-				"navigationBarTitleText": "识别确认"
-			}
-		},
-		{
-			"path": "pages/diagnose/self-test",
-			"style": {
-				"navigationBarTitleText": "摸底自测"
-			}
-		},
-		{
-			"path": "pages/diagnose/report",
-			"style": {
-				"navigationBarTitleText": "诊断报告"
-			}
-		},
-		{
-			"path": "pages/plan/create",
-			"style": {
-				"navigationBarTitleText": "创建备考计划"
-			}
-		},
-		{
-			"path": "pages/auth/login",
-			"style": {
-				"navigationBarTitleText": "登录"
-			}
-		},
-		{
-			"path": "pages/diagnose/graph",
-			"style": {
-				"navigationBarTitleText": "知识点图谱"
-			}
-		},
-		{
-			"path": "pages/sprint/index",
-			"style": {
-				"navigationBarTitleText": "考前突击"
-			}
-		},
-		{
-			"path": "pages/leaderboard/index",
-			"style": {
-				"navigationBarTitleText": "排行榜"
-			}
-		},
-		{
-			"path": "pages/mine/share",
-			"style": {
-				"navigationBarTitleText": "成绩单海报"
-			}
-		},
-		{
-			"path": "pages/onboarding/index",
-			"style": {
-				"navigationBarTitleText": "选课引导",
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/plaza/index",
-			"style": {
-				"navigationBarTitleText": "课程广场"
-			}
-		},
-		{
-			"path": "pages/course-entry/index",
-			"style": {
-				"navigationBarTitleText": "录入校本课程"
-			}
-		},
-		{
-			"path": "pages/ugc/index",
-			"style": {
-				"navigationBarTitleText": "题库共建"
-			}
-		}
-	],
-	"tabBar": {
-		"color": "#9CA3AF",
-		"selectedColor": "#F59E0B",
-		"backgroundColor": "#FFFFFF",
-		"borderStyle": "black",
-		"list": [
-			{
-				"pagePath": "pages/subjects/index",
-				"text": "首页",
-				"iconPath": "static/tabbar/home.png",
-				"selectedIconPath": "static/tabbar/home-active.png"
-			},
-			{
-				"pagePath": "pages/practice/index",
-				"text": "刷题",
-				"iconPath": "static/tabbar/practice.png",
-				"selectedIconPath": "static/tabbar/practice-active.png"
-			},
-			{
-				"pagePath": "pages/ocr/index",
-				"text": "拍照",
-				"iconPath": "static/tabbar/camera.png",
-				"selectedIconPath": "static/tabbar/camera-active.png"
-			},
-			{
-				"pagePath": "pages/diagnose/index",
-				"text": "诊断",
-				"iconPath": "static/tabbar/diagnose.png",
-				"selectedIconPath": "static/tabbar/diagnose-active.png"
-			},
-			{
-				"pagePath": "pages/mine/index",
-				"text": "我的",
-				"iconPath": "static/tabbar/mine.png",
-				"selectedIconPath": "static/tabbar/mine-active.png"
-			}
-		]
-	},
-	"globalStyle": {
-		"navigationBarTextStyle": "white",
-		"navigationBarTitleText": "AceExam",
-		"navigationBarBackgroundColor": "#F59E0B",
-		"backgroundColor": "#F3F4F6"
-	}
+ "easycom": {
+  "autoscan": true,
+  "custom": {
+   "^uni-(.*)": "@dcloudio/uni-ui/lib/uni-$1/uni-$1.vue"
+  }
+ },
+ "pages": [
+  {
+   "path": "pages/subjects/index",
+   "style": {
+    "navigationBarTitleText": "AceExam",
+    "navigationStyle": "custom"
+   }
+  },
+  {
+   "path": "pages/practice/index",
+   "style": {
+    "navigationBarTitleText": "刷题"
+   }
+  },
+  {
+   "path": "pages/ocr/index",
+   "style": {
+    "navigationBarTitleText": "拍照录题"
+   }
+  },
+  {
+   "path": "pages/diagnose/index",
+   "style": {
+    "navigationBarTitleText": "诊断"
+   }
+  },
+  {
+   "path": "pages/mine/index",
+   "style": {
+    "navigationBarTitleText": "我的"
+   }
+  },
+  {
+   "path": "pages/chat/index",
+   "style": {
+    "navigationBarTitleText": "AI 备考教练"
+   }
+  },
+  {
+   "path": "pages/ocr/confirm",
+   "style": {
+    "navigationBarTitleText": "识别确认"
+   }
+  },
+  {
+   "path": "pages/diagnose/self-test",
+   "style": {
+    "navigationBarTitleText": "摸底自测"
+   }
+  },
+  {
+   "path": "pages/diagnose/report",
+   "style": {
+    "navigationBarTitleText": "诊断报告"
+   }
+  },
+  {
+   "path": "pages/plan/create",
+   "style": {
+    "navigationBarTitleText": "创建备考计划"
+   }
+  },
+  {
+   "path": "pages/auth/login",
+   "style": {
+    "navigationBarTitleText": "登录"
+   }
+  },
+  {
+   "path": "pages/diagnose/graph",
+   "style": {
+    "navigationBarTitleText": "知识点图谱"
+   }
+  },
+  {
+   "path": "pages/sprint/index",
+   "style": {
+    "navigationBarTitleText": "考前突击"
+   }
+  },
+  {
+   "path": "pages/leaderboard/index",
+   "style": {
+    "navigationBarTitleText": "排行榜"
+   }
+  },
+  {
+   "path": "pages/mine/share",
+   "style": {
+    "navigationBarTitleText": "成绩单海报"
+   }
+  },
+  {
+   "path": "pages/onboarding/index",
+   "style": {
+    "navigationBarTitleText": "选课引导",
+    "navigationStyle": "custom"
+   }
+  },
+  {
+   "path": "pages/plaza/index",
+   "style": {
+    "navigationBarTitleText": "课程广场"
+   }
+  },
+  {
+   "path": "pages/course-entry/index",
+   "style": {
+    "navigationBarTitleText": "录入校本课程"
+   }
+  },
+  {
+   "path": "pages/ugc/index",
+   "style": {
+    "navigationBarTitleText": "题库共建"
+   }
+  }
+ ],
+ "tabBar": {
+  "color": "#9CA3AF",
+  "selectedColor": "#F59E0B",
+  "backgroundColor": "#FFFFFF",
+  "borderStyle": "black",
+  "list": [
+   {
+    "pagePath": "pages/subjects/index",
+    "text": "首页",
+    "iconPath": "static/tabbar/home.png",
+    "selectedIconPath": "static/tabbar/home-active.png"
+   },
+   {
+    "pagePath": "pages/practice/index",
+    "text": "刷题",
+    "iconPath": "static/tabbar/practice.png",
+    "selectedIconPath": "static/tabbar/practice-active.png"
+   },
+   {
+    "pagePath": "pages/diagnose/index",
+    "text": "诊断",
+    "iconPath": "static/tabbar/diagnose.png",
+    "selectedIconPath": "static/tabbar/diagnose-active.png"
+   },
+   {
+    "pagePath": "pages/mine/index",
+    "text": "我的",
+    "iconPath": "static/tabbar/mine.png",
+    "selectedIconPath": "static/tabbar/mine-active.png"
+   }
+  ]
+ },
+ "globalStyle": {
+  "navigationBarTextStyle": "white",
+  "navigationBarTitleText": "AceExam",
+  "navigationBarBackgroundColor": "#F59E0B",
+  "backgroundColor": "#F3F4F6"
+ }
 }

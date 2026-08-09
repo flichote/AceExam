@@ -167,6 +167,22 @@
       </view>
     </view>
 
+    <!-- 拍照录题入口（M2 五件套之一，低频 → 从 tab 移入首页卡片） -->
+    <view class="section">
+      <view class="card ai-entry" @click="goOcr">
+        <view class="ai-entry-left">
+          <view class="ai-entry-icon">
+            <text class="ai-entry-icon-text">📸</text>
+          </view>
+          <view class="ai-entry-texts">
+            <text class="ai-entry-title">拍照录题</text>
+            <text class="ai-entry-desc">拍下纸质题，OCR 识别入库</text>
+          </view>
+        </view>
+        <text class="ai-entry-arrow">›</text>
+      </view>
+    </view>
+
     <view class="page-foot">
       <text class="page-foot-text">AceExam · 让你的期末稳稳上岸</text>
     </view>
@@ -359,6 +375,11 @@ function goCreatePlan(subjectId?: string) {
 
 function goChat() {
   uni.navigateTo({ url: "/pages/chat/index" });
+}
+
+/** 拍照录题（M2 五件套，非 tabBar 页 → navigateTo） */
+function goOcr() {
+  uni.navigateTo({ url: "/pages/ocr/index" });
 }
 
 function goDiagnose() {
