@@ -13,7 +13,7 @@
         </view>
       </view>
       <view class="hero-greeting">
-        <text class="hero-greeting-text">{{ greeting }}，同学 👋</text>
+        <text class="hero-greeting-text">{{ greetingText }} 👋</text>
         <text class="hero-greeting-sub">今天也要离上岸近一步</text>
       </view>
     </view>
@@ -178,6 +178,7 @@ import { computed, ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { useSubjectStore } from "@/stores/subject";
 import { usePlanStore } from "@/stores/plan";
+import { useAuthStore } from "@/stores/auth";
 import type { KnowledgePointHit, WarningItem, RiskLevel, UserSubjectItem, UserSubjectStats } from "@/types";
 import { fetchWarnings } from "@/api/warnings";
 import { fetchDashboard } from "@/api/dashboard";
@@ -192,6 +193,7 @@ import WarningList from "@/components/WarningList.vue";
 
 const subjectStore = useSubjectStore();
 const planStore = usePlanStore();
+const authStore = useAuthStore();
 
 const statusBarHeight = ref(20);
 
@@ -215,6 +217,7 @@ onLoad(() => {
 });
 
 onShow(() => {
+  authStore.refreshUser();
   subjectStore.loadSubjects();
   planStore.loadActive();
   loadMySubjects();
@@ -315,6 +318,12 @@ const greeting = computed(() => {
   if (h < 12) return "早上好";
   if (h < 18) return "下午好";
   return "晚上好";
+});
+
+/** 首页问候：登录用户显示「用户名同学，早上好」；未登录/无用户回退「同学」 */
+const greetingText = computed(() => {
+  const name = authStore.user?.username?.trim();
+  return name ? `${name} 同学，${greeting.value}` : `${greeting.value}，同学`;
 });
 
 /** tab 间传递科目：selectSubject + switchTab（navigateTo 无法打开 tabBar 页） */
