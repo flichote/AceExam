@@ -767,4 +767,15 @@ PYTHONPATH= .venv/Scripts/python.exe -m pytest -q                               
 - **修复**：改用 `Settings(_env_file=None)` + `monkeypatch.delenv("DATABASE_URL")` 隔离外部配置，只验证默认值语义
 - **效果**：全量回归不再有环境性 failed，质量门禁彻底干净
 
+## trend 周粒度跳过 end 周 ✅ 已修复（日历边界 bug）
+
+- **现象**：`GET /me/dashboard/trend?granularity=week` 当 `end_date`（今天）恰好是周一（weekday=0）时，最后一周桶丢失 —— 2026-08-10（周一）实测：桶只到 08-03，**今天所在周整周数据不可见**
+- **根因**：`dashboard.py` trend 循环 week 分支 `current += timedelta(days=7)`，从 start_date 步进；end=周一 时 8/9(周日) → 8/16(>end) 直接跳过 8/10 桶。与 D-35 同族（日历/时区边界 flaky），因个人电脑跑全量时恰非周一而长期未暴露
+- **修复**：week 步进改为 `current = bucket_key + timedelta(days=7)`（从桶起点跳转），保证 end 所在周必被生成
+- **验证**：API 实测桶数 5→6，`2026-08-10 | 题数: 8` 正确出现；`test_m3_dashboard.py` 10 passed（含 day/week/month 回归）
+
+## 修复后全量回归（办公电脑环境）
+
+`638 passed, 7 skipped, 10 xfailed, 12 xpassed, 0 failed` —— 环境性失败清零；migration 测试在无完整 `.venv` 时正确 skip（个人电脑会正常执行）。提交 `da4a782`。
+
 
