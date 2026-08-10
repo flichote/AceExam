@@ -13,10 +13,17 @@ import app.core.config as config_module
 class TestSettingsDefaults:
     """RED → GREEN: verify defaults when no env vars are set."""
 
-    def test_default_database_url(self):
-        """Default DATABASE_URL should be the local Postgres string."""
-        assert "asyncpg" in config_module.settings.DATABASE_URL
-        assert "aceexam" in config_module.settings.DATABASE_URL
+    def test_default_database_url(self, monkeypatch):
+        """Default DATABASE_URL should be the local Postgres string.
+
+        Uses Settings(_env_file=None) to isolate from any .env file
+        (e.g. a local dev .env with DATABASE_URL=sqlite... would otherwise
+        override the default and make this test environment-dependent).
+        """
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        s = config_module.Settings(_env_file=None)
+        assert "asyncpg" in s.DATABASE_URL
+        assert "aceexam" in s.DATABASE_URL
 
     def test_default_jwt_algorithm_is_hs256(self):
         assert config_module.settings.JWT_ALGORITHM == "HS256"

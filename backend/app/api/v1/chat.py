@@ -240,7 +240,7 @@ async def generate_tts(
     # Cache key
     cache_key = hashlib.sha256((text + body.voice).encode()).hexdigest()
     cache_file = _TTS_CACHE_DIR / f"{cache_key}.mp3"
-    audio_url = f"/api/v1/tts/audio/{cache_key}.mp3"
+    audio_url = f"/api/v1/chat/tts/audio/{cache_key}.mp3"
 
     cache_hit = cache_file.exists()
     text_preview = text[:100] + "……" if len(text) > 100 else text

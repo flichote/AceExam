@@ -751,4 +751,20 @@ PYTHONPATH= .venv/Scripts/python.exe -m pytest -q                               
 
 **发布建议**：M5 主链路（课程录入联想/匹配/映射、UGC 投稿 AI 初审/状态查询）验收通过，无 P1 阻断，可进入发布评审。**建议 ep-backend/ep-ai 在发布前或 M6 排期处理 D-34（别名沉淀飞轮）与 D-36（pass 结果透传）**——两者均属契约明示行为（架构 §14.2 / api.md §14.5），缺陷用例已 xfail 固化，修复后自动转 XPASS。
 
+---
+
+# 补记（2026-08 办公电脑巡检修复）
+
+## D-24 ✅ 已修复（chat.py audio_url 补 /chat 段）
+
+- **修复**：`backend/app/api/v1/chat.py` 第 243 行 `audio_url` 由 `/api/v1/tts/audio/{key}.mp3` 改为 `/api/v1/chat/tts/audio/{key}.mp3`（router prefix=/chat，真实路由一致）
+- **测试**：`test_m35_tts_api.py::test_audio_url_from_tts_matches_route` 移除 xfail 标记转正；`test_tts_generates_audio` 的旧断言（固化错误 URL 格式）同步更新
+- **验证**：TTS 专项 21 passed / 1 xfailed（剩余 xfail 为 D-23 display math 清洗，P3 排期）
+
+## test_config 环境性失败 ✅ 已修复
+
+- **根因**：`test_default_database_url` 直接读模块级 `settings`，本地 `.env` 若含 `DATABASE_URL=sqlite...` 会覆盖默认 PG 串 → 环境性失败（M3~M5 报告反复出现的"预存环境性 1 failed"）
+- **修复**：改用 `Settings(_env_file=None)` + `monkeypatch.delenv("DATABASE_URL")` 隔离外部配置，只验证默认值语义
+- **效果**：全量回归不再有环境性 failed，质量门禁彻底干净
+
 

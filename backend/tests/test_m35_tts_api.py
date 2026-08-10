@@ -261,7 +261,7 @@ class TestTTSSynthesize:
         assert data["session_id"] == str(session.id)
         assert data["voice"] == "zh-CN-XiaoxiaoNeural"
         assert data["cache_hit"] is False
-        assert data["audio_url"].startswith("/api/v1/tts/audio/")
+        assert data["audio_url"].startswith("/api/v1/chat/tts/audio/")  # D-24 修复：含 /chat 段
         assert data["audio_url"].endswith(".mp3")
         assert "极限" in data["text_preview"]  # LaTeX 已清洗、中文保留
         # 磁盘缓存已生成
@@ -357,14 +357,12 @@ class TestTTSAudioDownload:
         assert dl.headers["content-type"] == "audio/mpeg"
         assert dl.content == b"\xff\xfb\x90\x00" * 200
 
-    @pytest.mark.xfail(reason="D-24 TTS 返回 audio_url 缺少 /chat 段，前端按 audio_url 请求必 404", strict=False)
     async def test_audio_url_from_tts_matches_route(
         self, client: AsyncClient, db_session, member_user_id, member_user, tts_cache_dir, monkeypatch
     ):
-        """D-24 固化：§12.1 响应的 audio_url 应可直接 GET（200）。
+        """D-24 修复验证：§12.1 响应的 audio_url 应可直接 GET（200）。
 
-        实际：audio_url=/api/v1/tts/audio/... 但真实路由=/api/v1/chat/tts/audio/...，
-        audio_url 请求返回 404（FastAPI 无此路由）。修复后此用例应 200。
+        修复：chat.py audio_url 补 /chat 段（/api/v1/chat/tts/audio/...）。
         """
         session = await _seed_session(db_session, member_user_id)
         _, _, _, headers = member_user

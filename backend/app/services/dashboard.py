@@ -310,7 +310,9 @@ async def get_dashboard_trend(
         if granularity == "day":
             current += timedelta(days=1)
         elif granularity == "week":
-            current += timedelta(days=7)
+            # 从桶起点跳转到下一周，避免 end_date 恰好是周一（weekday=0）时
+            # 最后一周被 current+7 步进跳过（8/9 → 8/16 > end，8/10 桶丢失）
+            current = bucket_key + timedelta(days=7)
         else:
             next_month = current.replace(day=28) + timedelta(days=4)
             current = next_month - timedelta(days=next_month.day - 1)
