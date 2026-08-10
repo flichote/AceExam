@@ -38,7 +38,17 @@
       >
         <text class="login-btn-text">{{ auth.loggingIn ? "登录中…" : "登录" }}</text>
       </view>
-      <text class="login-tip">后端未就绪时使用演示账号自动登录（mock 兜底）</text>
+      <view
+        class="btn demo-btn"
+        :class="{ 'btn--disabled': auth.loggingIn }"
+        @click="onDemoLogin"
+      >
+        <text class="demo-btn-text">✨ 一键体验演示账号（demo_student1）</text>
+      </view>
+      <view class="switch-row" @click="goRegister">
+        <text class="switch-text">还没有账号？去注册</text>
+      </view>
+      <text class="login-tip">演示账号数据齐全：高数+英语、挂科预警、连胜记录</text>
     </view>
   </view>
 </template>
@@ -74,6 +84,19 @@ async function onLogin() {
       uni.switchTab({ url: "/pages/subjects/index" });
     }
   }, 600);
+}
+
+/** 一键体验：填入演示账号 demo_student1 并登录（后端 seed 数据齐全） */
+async function onDemoLogin() {
+  if (auth.loggingIn) return;
+  username.value = "demo_student1";
+  password.value = "demo123456";
+  await onLogin();
+}
+
+/** 跳转注册页（无页面栈时用 reLaunch 兜底） */
+function goRegister() {
+  uni.navigateTo({ url: "/pages/auth/register" });
 }
 
 /** 登录后判断：major 为空 或 未选课 → 引导页；否则直接返回 */
@@ -161,6 +184,27 @@ async function checkNeedsOnboarding(): Promise<boolean> {
   font-size: $font-body;
   font-weight: 700;
   letter-spacing: 2rpx;
+}
+.demo-btn {
+  width: 100%;
+  margin-top: 20rpx;
+  padding: 18rpx 0;
+  background: $neutral-100;
+  border: 2rpx solid $primary-100;
+}
+.demo-btn-text {
+  color: $primary-500;
+  font-size: 26rpx;
+  font-weight: 600;
+}
+.switch-row {
+  margin-top: 24rpx;
+  padding: 8rpx 16rpx;
+}
+.switch-text {
+  font-size: 26rpx;
+  color: $primary-500;
+  font-weight: 600;
 }
 .login-tip {
   margin-top: 16rpx;

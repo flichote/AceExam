@@ -74,6 +74,12 @@
    }
   },
   {
+   "path": "pages/auth/register",
+   "style": {
+    "navigationBarTitleText": "注册"
+   }
+  },
+  {
    "path": "pages/diagnose/graph",
    "style": {
     "navigationBarTitleText": "知识点图谱"
