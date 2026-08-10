@@ -920,6 +920,7 @@ def _seed_m3_demo(session: Session) -> None:
         password_hash=password_hash,
         role="student",
         is_member=True,
+        phone="13800000001",
     )
     session.add(u1)
     session.flush()
@@ -1002,6 +1003,7 @@ def _seed_m3_demo(session: Session) -> None:
         password_hash=password_hash,
         role="student",
         is_member=True,
+        phone="13800000002",
     )
     session.add(u2)
     session.flush()
@@ -1047,6 +1049,7 @@ def _seed_m3_demo(session: Session) -> None:
         password_hash=password_hash,
         role="student",
         is_member=False,
+        phone="13800000003",
     )
     session.add(u3)
     session.flush()

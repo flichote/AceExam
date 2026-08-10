@@ -48,6 +48,9 @@
       <view class="switch-row" @click="goRegister">
         <text class="switch-text">还没有账号？去注册</text>
       </view>
+      <view class="switch-row" @click="goForgotPassword">
+        <text class="switch-text forgot-text">忘记密码？</text>
+      </view>
       <text class="login-tip">演示账号数据齐全：高数+英语、挂科预警、连胜记录</text>
     </view>
   </view>
@@ -97,6 +100,11 @@ async function onDemoLogin() {
 /** 跳转注册页（无页面栈时用 reLaunch 兜底） */
 function goRegister() {
   uni.navigateTo({ url: "/pages/auth/register" });
+}
+
+/** 跳转找回密码页 */
+function goForgotPassword() {
+  uni.navigateTo({ url: "/pages/auth/forgot-password" });
 }
 
 /** 登录后判断：major 为空 或 未选课 → 引导页；否则直接返回 */
@@ -205,6 +213,11 @@ async function checkNeedsOnboarding(): Promise<boolean> {
   font-size: 26rpx;
   color: $primary-500;
   font-weight: 600;
+}
+.forgot-text {
+  color: $neutral-500;
+  font-weight: 400;
+  font-size: 24rpx;
 }
 .login-tip {
   margin-top: 16rpx;

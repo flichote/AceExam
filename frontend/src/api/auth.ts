@@ -82,3 +82,42 @@ export async function fetchMe(): Promise<UserProfile> {
     })
   );
 }
+
+export interface RequestCodeResult {
+  message: string;
+  debug_code?: string;
+}
+
+/** 找回密码①：手机号 → 发验证码（DEBUG 模式返回 debug_code 便于联调） */
+export async function requestPwdCode(phone: string): Promise<RequestCodeResult> {
+  return withFallback(
+    () =>
+      request<RequestCodeResult>({
+        url: "/auth/forgot-password/request-code",
+        method: "POST",
+        data: { phone },
+        auth: false,
+        redirectOn401: false,
+      }),
+    () => ({ message: "验证码已发送（演示模式）", debug_code: "123456" }),
+    "服务暂不可用，请稍后再试",
+    { write: true }
+  );
+}
+
+/** 找回密码②：验证码 + 新密码 → 重置 */
+export async function resetPassword(phone: string, code: string, newPassword: string): Promise<{ message: string }> {
+  return withFallback(
+    () =>
+      request<{ message: string }>({
+        url: "/auth/forgot-password/reset",
+        method: "POST",
+        data: { phone, code, new_password: newPassword },
+        auth: false,
+        redirectOn401: false,
+      }),
+    () => ({ message: "密码已重置" }),
+    "服务暂不可用，请稍后再试",
+    { write: true }
+  );
+}

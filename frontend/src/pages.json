@@ -80,6 +80,12 @@
    }
   },
   {
+   "path": "pages/auth/forgot-password",
+   "style": {
+    "navigationBarTitleText": "找回密码"
+   }
+  },
+  {
    "path": "pages/diagnose/graph",
    "style": {
     "navigationBarTitleText": "知识点图谱"

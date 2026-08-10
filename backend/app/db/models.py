@@ -49,6 +49,7 @@ class User(Base):
         ForeignKey("classes.id", use_alter=True), nullable=True, index=True
     )
     major: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)  # M4：专业（自由文本）
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)  # M6：手机号（找回密码）
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
